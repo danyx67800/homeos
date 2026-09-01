@@ -29,12 +29,21 @@ die()  { printf '  %s[XX]%s %s\n' "$c_err" "$c_off" "$*" >&2; exit 1; }
 
 [[ "${EUID:-$(id -u)}" -eq 0 ]] || die "run this with sudo"
 
+# Under `set -euo pipefail` a command substitution whose command does not exist
+# aborts the script with no output at all — which is exactly the experience this
+# script exists to spare people. Name the line instead.
+trap 'rc=$?; printf "
+  %s[XX]%s failed at line %s (exit %s)
+" "$c_err" "$c_off" "$LINENO" "$rc" >&2' ERR
+
 # --------------------------------------------------------------------------
 # Which Go version? Read it from go.mod so this script can never drift from
 # what the code actually requires.
 # --------------------------------------------------------------------------
-GO_REQUIRED="$(awk '/^go [0-9]/ {print $2; exit}' "${REPO_ROOT}/backend/go.mod")"
-[[ -n "$GO_REQUIRED" ]] || die "cannot read the required Go version from backend/go.mod"
+[[ -r "${REPO_ROOT}/backend/go.mod" ]] \
+    || die "cannot read ${REPO_ROOT}/backend/go.mod — run this from a HomeOS checkout"
+GO_REQUIRED="$(awk '/^go [0-9]/ {print $2; exit}' "${REPO_ROOT}/backend/go.mod")" || true
+[[ -n "$GO_REQUIRED" ]] || die "backend/go.mod has no 'go' directive"
 # go.mod may say 1.25 or 1.25.0; the download needs a full version.
 [[ "$GO_REQUIRED" == *.*.* ]] || GO_REQUIRED="${GO_REQUIRED}.0"
 
@@ -43,6 +52,16 @@ case "$(uname -m)" in
     aarch64|arm64) GOARCH=arm64 ;;
     *) die "unsupported architecture $(uname -m); HomeOS builds for amd64 and arm64" ;;
 esac
+
+# probe_version <binary> <args...> — print a version string, or nothing if the
+# binary is absent. Guarded by command -v because a missing command inside a
+# pipeline returns 127, and pipefail would turn "not installed" into a fatal
+# error.
+probe_version() {
+    local bin="$1"; shift
+    command -v "$bin" >/dev/null 2>&1 || return 0
+    "$bin" "$@" 2>/dev/null || true
+}
 
 # version_ge A B — true when A >= B, comparing dotted numbers.
 version_ge() {
@@ -64,19 +83,18 @@ ok "curl, tar, git, ca-certificates"
 step "Node.js (dashboard build)"
 NODE_MIN=18
 
-node_version() { node --version 2>/dev/null | sed 's/^v//'; }
+have_node="$(probe_version node --version | sed 's/^v//')"
 
-if have_node="$(node_version)" && [[ -n "$have_node" ]] \
-   && version_ge "$have_node" "$NODE_MIN"; then
+if [[ -n "$have_node" ]] && version_ge "$have_node" "$NODE_MIN"; then
     ok "node ${have_node} already installed"
 else
     apt-get install -y -qq --no-install-recommends nodejs npm >/dev/null \
         || die "could not install nodejs from apt"
-    have_node="$(node_version)"
+    have_node="$(probe_version node --version | sed 's/^v//')"
     [[ -n "$have_node" ]] || die "nodejs installed but 'node' is not on PATH"
     version_ge "$have_node" "$NODE_MIN" \
-        || die "this release packages node ${have_node}, but the dashboard needs ${NODE_MIN}+.
-     Install a newer Node from https://github.com/nodesource/distributions and re-run."
+        || die "this release packages node ${have_node}, but the dashboard needs
+     ${NODE_MIN}+. Install a newer one from https://github.com/nodesource/distributions"
     ok "node ${have_node}"
 fi
 ok "npm $(npm --version 2>/dev/null || echo '?')"
@@ -86,8 +104,10 @@ ok "npm $(npm --version 2>/dev/null || echo '?')"
 # --------------------------------------------------------------------------
 step "Go ${GO_REQUIRED} (backend build)"
 
-installed_go="$("${GO_INSTALL_DIR}/go/bin/go" version 2>/dev/null | awk '{print $3}' | sed 's/^go//')"
-[[ -z "$installed_go" ]] && installed_go="$(go version 2>/dev/null | awk '{print $3}' | sed 's/^go//')"
+installed_go="$(probe_version "${GO_INSTALL_DIR}/go/bin/go" version | awk '{print $3}' | sed 's/^go//')"
+if [[ -z "$installed_go" ]]; then
+    installed_go="$(probe_version go version | awk '{print $3}' | sed 's/^go//')"
+fi
 
 if [[ -n "$installed_go" ]] && version_ge "$installed_go" "$GO_REQUIRED"; then
     ok "go ${installed_go} already installed and new enough"
@@ -97,12 +117,12 @@ else
     TARBALL="go${GO_REQUIRED}.linux-${GOARCH}.tar.gz"
     URL="https://go.dev/dl/${TARBALL}"
 
-    # The checksum comes from go.dev's own index rather than being hardcoded
-    # here, so this script cannot go stale against a new Go release.
-    printf '  fetching the published checksum for %s\n' "$TARBALL"
-    WANT_SHA="$(curl -fsSL --max-time 30 'https://go.dev/dl/?mode=json&include=all' \
-        | tr '{' '\n' | grep -F "\"filename\": \"${TARBALL}\"" \
-        | grep -o '"sha256": "[a-f0-9]\{64\}"' | head -n1 | cut -d'"' -f4)"
+    # The index is pretty-printed, so a file's sha256 sits a few lines below its
+    # filename. grep works on lines, not on records, so -A is what ties the two
+    # together; splitting on braces looks right and silently finds nothing.
+    WANT_SHA="$(curl -fsSL --max-time 60 'https://go.dev/dl/?mode=json&include=all' \
+        | grep -A6 -F "\"filename\": \"${TARBALL}\"" \
+        | grep -o '"sha256": "[a-f0-9]\{64\}"' | head -n1 | cut -d'"' -f4)" || true
     [[ -n "$WANT_SHA" ]] \
         || die "could not find a published checksum for ${TARBALL}.
      Check that Go ${GO_REQUIRED} exists for linux/${GOARCH} at https://go.dev/dl/"
