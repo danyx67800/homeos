@@ -38,6 +38,14 @@ preflight::arch() {
 
 preflight::kernel() {
     HOMEOS_KERNEL="$(uname -r)"
+
+    # uname reports the host's kernel inside a chroot, not the one being
+    # installed into the image, so the check would be measuring the wrong thing.
+    if [[ -n "${HOMEOS_IMAGE_BUILD:-}" ]]; then
+        log::skip "kernel check (the image ships its own; the host runs ${HOMEOS_KERNEL})"
+        return 0
+    fi
+
     local major minor
     major="${HOMEOS_KERNEL%%.*}"
     minor="${HOMEOS_KERNEL#*.}"; minor="${minor%%.*}"
@@ -98,6 +106,15 @@ preflight::os() {
 }
 
 preflight::systemd() {
+    # Building an image needs systemd *installed*, so units can be enabled into
+    # the tree. It cannot be *running*: nothing runs in a chroot. Demanding the
+    # running state here is what stopped image builds.
+    if [[ -n "${HOMEOS_IMAGE_BUILD:-}" ]]; then
+        have systemctl || die "systemd is not installed in this root filesystem"
+        log::ok "systemd $(systemctl --version | head -n1 | awk '{print $2}') (installed, not running)"
+        return 0
+    fi
+
     systemd_available \
         || die "systemd is not the active init - HomeOS services cannot be registered"
     log::ok "systemd $(systemctl --version | head -n1 | awk '{print $2}')"
@@ -112,6 +129,11 @@ preflight::cgroups() {
 }
 
 preflight::resources() {
+    if [[ -n "${HOMEOS_IMAGE_BUILD:-}" ]]; then
+        log::skip "disk and memory check (these belong to the build host)"
+        return 0
+    fi
+
     local disk_mb ram_mb
     disk_mb="$(df -Pm /var 2>/dev/null | awk 'NR == 2 {print $4}')"
     ram_mb="$(awk '/MemTotal/ {printf "%d", $2 / 1024}' /proc/meminfo)"
