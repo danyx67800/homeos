@@ -45,7 +45,7 @@
     <Icon name="refresh" size={16} /> Software updates
   </h2>
 
-  {#if st === null}
+  {#if !st}
     <p class="muted text-sm">
       Over-the-air updates are not configured on this appliance. Set
       <code class="rounded bg-[rgb(var(--ink-2)/0.15)] px-1">update.channel_url</code>

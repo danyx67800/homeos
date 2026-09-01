@@ -36,8 +36,11 @@
   }
 </script>
 
-<div class="flex max-w-3xl flex-col gap-5">
-  <section class="panel p-5">
+<!-- Two columns from lg. The panels below System are all narrower than their
+     content box — stacking them left-aligned left the right half of a desktop
+     screen empty and pushed the password form below the fold for no reason. -->
+<div class="grid max-w-5xl grid-cols-1 gap-5 lg:grid-cols-2">
+  <section class="panel p-5 lg:col-span-2">
     <h2 class="mb-4 flex items-center gap-2 text-sm font-semibold">
       <Icon name="info" size={16} /> System
     </h2>
@@ -85,7 +88,7 @@
     <h2 class="mb-4 flex items-center gap-2 text-sm font-semibold">
       <Icon name="lock" size={16} /> Password
     </h2>
-    <form onsubmit={changePassword} class="flex max-w-sm flex-col gap-3">
+    <form onsubmit={changePassword} class="flex max-w-sm flex-col gap-3 lg:max-w-none">
       <label class="flex flex-col gap-1.5">
         <span class="muted text-xs font-medium">Current password</span>
         <input class="field" type="password" bind:value={current}
@@ -109,7 +112,7 @@
     </form>
   </section>
 
-  <p class="muted px-1 text-xs">
+  <p class="muted px-1 text-xs lg:col-span-2">
     Signed in as <strong>{session.username}</strong>. HomeOS accepts connections
     from your local network only.
   </p>
