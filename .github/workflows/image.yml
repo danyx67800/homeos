@@ -184,7 +184,7 @@ jobs:
           # virtualisation is not guaranteed on hosted runners.
           [ -w /dev/kvm ] && QEMU+=(-enable-kvm) && echo "using KVM" || echo "using TCG (slower)"
 
-          "${QEMU[@]}" -m 2048 -smp 2 -nographic -no-reboot \
+          "${QEMU[@]}" -m 2048 -smp 2 -display none -no-reboot \
             -drive "file=${IMG},format=raw,if=virtio" \
             -netdev "user,id=n0,hostfwd=tcp::8080-:80,hostfwd=tcp::2222-:22" \
             -device virtio-net-pci,netdev=n0 \
