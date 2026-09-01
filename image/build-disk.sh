@@ -111,7 +111,11 @@ mount -t proc  proc   "${MNT}/proc"
 mount -t sysfs sysfs  "${MNT}/sys"
 mount --bind /dev     "${MNT}/dev"
 mount -t devpts devpts "${MNT}/dev/pts"
-cp /etc/resolv.conf "${MNT}/etc/resolv.conf"
+# The rootfs ships /etc/resolv.conf as a symlink to systemd-resolved's stub, so
+# a plain cp resolves both sides to the same path and refuses. Replace it for
+# the duration of the chroot, and put the symlink back before closing up.
+rm -f "${MNT}/etc/resolv.conf"
+cp -L /etc/resolv.conf "${MNT}/etc/resolv.conf"
 
 in_img() { chroot "$MNT" /usr/bin/env -i \
     PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
@@ -160,7 +164,8 @@ in_img "update-initramfs -u -k all" >/dev/null 2>&1 || true
 # The loop device must not survive into the image's own GRUB config.
 sed -i "s|${LOOP}p2|UUID=${ROOT_UUID}|g" "${MNT}/boot/grub/grub.cfg" 2>/dev/null || true
 
-rm -f "${MNT}/etc/resolv.conf"
+# Back to what the appliance should ship with.
+ln -sfn /run/systemd/resolve/stub-resolv.conf "${MNT}/etc/resolv.conf"
 cleanup
 trap - EXIT INT TERM
 
