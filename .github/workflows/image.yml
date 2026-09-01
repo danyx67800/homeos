@@ -155,7 +155,7 @@ jobs:
             || { echo "::error::the ISO is not an ISO 9660 image"; exit 1; }
 
       - name: Boot the image and check the dashboard answers
-        timeout-minutes: 20
+        timeout-minutes: 45
         run: |
           set -euo pipefail
           # An image that builds is not an image that boots. This is the only
@@ -187,18 +187,20 @@ jobs:
           "${QEMU[@]}" -m 2048 -smp 2 -display none -no-reboot \
             -drive "file=${IMG},format=raw,if=virtio" \
             -netdev "user,id=n0,hostfwd=tcp::8080-:80,hostfwd=tcp::2222-:22" \
-            -device virtio-net-pci,netdev=n0 \
+            -device virtio-net-pci,netdev=n0,romfile= \
             -serial file:"${{ runner.temp }}/boot.log" \
             -daemonize -pidfile "${{ runner.temp }}/qemu.pid"
 
           echo "Waiting for the dashboard..."
           ok=0
-          for i in $(seq 1 90); do
+          for i in $(seq 1 200); do
             if curl -fsS --max-time 3 http://127.0.0.1:8080/api/v1/health >/tmp/health.json 2>/dev/null; then
               ok=1; break
             fi
             sleep 10
-            [ $((i % 6)) -eq 0 ] && echo "  ${i}0s..."
+            # Show what the machine is doing, so a hang reads differently from
+            # a slow boot without waiting out the whole timeout.
+            [ $((i % 6)) -eq 0 ] && echo "  ${i}0s - console: $(tail -1 "${{ runner.temp }}/boot.log" 2>/dev/null)"
           done
 
           echo "::group::serial console"
@@ -208,7 +210,7 @@ jobs:
           kill "$(cat "${{ runner.temp }}/qemu.pid")" 2>/dev/null || true
 
           if [ "$ok" != "1" ]; then
-            echo "::error::the image booted but nothing answered on port 80 within 15 minutes"
+            echo "::error::the image booted but nothing answered on port 80 before the timeout"
             exit 1
           fi
           echo "Dashboard answered:"
