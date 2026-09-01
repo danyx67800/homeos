@@ -11,7 +11,18 @@ air with automatic rollback. Everything below has been built and tested.
 
 ## Install
 
-On a fresh minimal Debian 12 or Ubuntu 22.04+ system:
+**The easy way** — flash a prebuilt image, no Linux setup at all:
+
+```bash
+# On another machine: write the image to the appliance's disk
+xzcat homeos-<version>-amd64.img.xz | sudo dd of=/dev/sdX bs=4M conv=fsync status=progress
+```
+
+Or boot the `.iso` from a USB stick and let the installer write to the internal
+disk. Both are built by CI — see
+[docs/building-images.md](docs/building-images.md).
+
+**From source**, on a fresh minimal Debian 12 or Ubuntu 22.04+ system:
 
 ```bash
 git clone https://github.com/danyx67800/homeos.git
@@ -62,6 +73,7 @@ the system, reporting what it skipped.
 - **A dashboard** at 46 KB gzipped — live gauges, an app launcher, the store,
   and storage and share panels.
 - **Over-the-air updates** with signature verification and automatic rollback.
+- **Flashable images and an installer ISO**, built for amd64 and arm64 in CI.
 
 ---
 
@@ -268,6 +280,7 @@ web/                             dashboard SPA (Svelte 5 + Vite + Tailwind 4)
 ├── src/components/              gauge, sparkline, tiles, modal, menu, toasts
 ├── src/views/                   sign-in, dashboard, store, storage, shares, settings
 └── e2e.mjs                      Playwright checks against a running daemon
+image/                           appliance image and installer ISO builders
 docker/                          containerised stack (dev + demo)
 docs/
 ├── quickstart.md                the two-page version
@@ -289,6 +302,7 @@ the way they are.
 | Document | What it covers |
 |---|---|
 | [quickstart.md](docs/quickstart.md) | **start here** — install, add an app, add a disk, update, back up |
+| [building-images.md](docs/building-images.md) | the flashable image and the installer ISO, and how CI builds them |
 | [deployment.md](docs/deployment.md) | the full version: Docker, building from source, release signing, troubleshooting |
 | [app-manifest-schema.md](docs/app-manifest-schema.md) | `homeos-app.yml`, and what the backend generates from it |
 | [api-reference.md](docs/api-reference.md) | every endpoint, status codes, streaming |
