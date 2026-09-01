@@ -190,6 +190,11 @@ in_chroot "/usr/lib/homeos/bin/homeos-core -version" \
 # --------------------------------------------------------------------------
 # First boot
 # --------------------------------------------------------------------------
+step "Persistent journal"
+# Without this directory journald keeps the log in RAM, and it is gone the
+# moment the machine stops — which is exactly when you want to read it.
+mkdir -p "${ROOTFS}/var/log/journal"
+
 step "Console"
 install -D -m 0755 "${REPO_ROOT}/scripts/homeos-console"     "${ROOTFS}/usr/lib/homeos/bin/homeos-console"
 
@@ -243,6 +248,12 @@ ln -sfn /run/systemd/resolve/stub-resolv.conf "${ROOTFS}/etc/resolv.conf"
 : > "${ROOTFS}/etc/machine-id"          # regenerated per machine on first boot
 rm -f "${ROOTFS}"/etc/ssh/ssh_host_*    # regenerated per machine on first boot
 find "${ROOTFS}/var/log" -type f -delete 2>/dev/null || true
+
+step "Units this image will start"
+# Cheap, and it answers directly the question that otherwise costs a 50-minute
+# boot to ask: is the thing that is not running actually enabled?
+in_chroot "systemctl list-unit-files --state=enabled --no-legend --no-pager" 2>/dev/null \
+    | awk '{print "  " $1}' | sort || true
 
 cleanup
 printf '\n\033[32m[ok]\033[0m rootfs ready: %s (%s)\n' \

@@ -210,7 +210,30 @@ jobs:
           kill "$(cat "${{ runner.temp }}/qemu.pid")" 2>/dev/null || true
 
           if [ "$ok" != "1" ]; then
-            echo "::error::the image booted but nothing answered on port 80 before the timeout"
+            # Mount the image the VM was just running and read its journal. The
+            # serial console only shows what systemd chose to print; the journal
+            # says which unit failed and why, which is the difference between
+            # diagnosing this and guessing at it.
+            echo "::group::inside the image that did not answer"
+            LOOP="$(sudo losetup --find --show --partscan "$IMG")"
+            sleep 2
+            sudo mkdir -p /mnt/probe
+            if sudo mount "${LOOP}p2" /mnt/probe 2>/dev/null; then
+              echo "--- failed and warning-level units ---"
+              sudo journalctl -D /mnt/probe/var/log/journal --no-pager -p warning -n 100 \
+                2>/dev/null || echo "(no persistent journal on the image)"
+              echo "--- units enabled for multi-user ---"
+              ls /mnt/probe/etc/systemd/system/multi-user.target.wants/ 2>/dev/null || true
+              echo "--- resolv.conf ---"
+              ls -l /mnt/probe/etc/resolv.conf 2>/dev/null || true
+              sudo umount /mnt/probe || true
+            else
+              echo "could not mount the root partition to look inside"
+            fi
+            sudo losetup -d "$LOOP" 2>/dev/null || true
+            echo "::endgroup::"
+
+            echo "::error::nothing answered on port 80 before the timeout"
             exit 1
           fi
           echo "Dashboard answered:"

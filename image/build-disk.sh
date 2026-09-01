@@ -153,7 +153,7 @@ GRUB_TIMEOUT=3
 GRUB_TIMEOUT_STYLE=menu
 # console= twice on purpose: serial first for headless boards, then VGA, so
 # whichever exists gets the output.
-GRUB_CMDLINE_LINUX_DEFAULT="quiet loglevel=3 console=ttyS0,115200 console=tty0"
+GRUB_CMDLINE_LINUX_DEFAULT="loglevel=4 systemd.show_status=yes console=ttyS0,115200 console=tty0"
 GRUB_CMDLINE_LINUX=""
 GRUB_DISABLE_RECOVERY=false
 GRUBCFG
