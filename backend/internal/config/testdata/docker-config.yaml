@@ -50,7 +50,7 @@ samba:
   share_group: homeos-share
 
 appstore:
-  repository: https://github.com/homeos-apps/appstore.git
+  repository: https://github.com/danyx67800/homeos-appstore.git
   branch: main
   refresh_interval_hours: 12
 

@@ -212,7 +212,7 @@ func (c *Config) applyDefaults() {
 	set(&c.Samba.ManagedConfig, "/etc/homeos/samba/shares.conf")
 	set(&c.Samba.ShareGroup, "homeos-share")
 
-	set(&c.AppStore.Repository, "https://github.com/homeos-apps/appstore.git")
+	set(&c.AppStore.Repository, "https://github.com/danyx67800/homeos-appstore.git")
 	set(&c.AppStore.Branch, "main")
 	if c.AppStore.RefreshIntervalHours == 0 {
 		c.AppStore.RefreshIntervalHours = 12
