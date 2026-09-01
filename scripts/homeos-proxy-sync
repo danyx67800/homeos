@@ -178,6 +178,13 @@ generate_into() {
     cp -f "${ROUTES_DIR}/00-placeholder.path.caddy" "$stage/" 2>/dev/null || \
         printf '# placeholder\n' > "${stage}/00-placeholder.path.caddy"
 
+    # Regenerated every run rather than copied forward: the allowed source
+    # ranges are read from the kernel's on-link routes, so a new LAN or a
+    # freshly delegated IPv6 prefix starts being accepted without anyone editing
+    # a file. It rides the same stage-validate-reload path as the routes, so a
+    # list that will not parse is rolled back rather than locking everyone out.
+    lan_only_caddy > "${stage}/00-lan.lan.caddy"
+
     while IFS=$'\t' read -r app title mode scheme uphost upport pubport strip cname; do
         [[ -n "$app" ]] || continue
         app="$(slugify "$app")"
@@ -378,6 +385,25 @@ cmd_status() {
     printf 'caddy       : %s\n' "$(systemctl is-active caddy 2>/dev/null || echo unknown)"
     printf 'config valid: %s\n' \
         "$(caddy validate --config "$CADDYFILE" >/dev/null 2>&1 && echo yes || echo NO)"
+
+    # The two things that decide whether an app opens: whether its name resolves
+    # on the network, and whether the proxy will accept the client's address.
+    # Both were invisible from here, which made "the app does not open"
+    # impossible to narrow down without reading generated files by hand.
+    printf 'lan ranges  : %s\n' "$(lan_ranges)"
+    printf 'avahi       : %s\n' "$(systemctl is-active avahi-daemon 2>/dev/null || echo unknown)"
+    printf 'mdns aliases: %s\n' "$(
+        systemctl list-units --state=active --no-legend --plain 'homeos-mdns-*.service' 2>/dev/null \
+            | awk '{ sub(/^homeos-mdns-/, "", $1); sub(/\.service$/, "", $1); print $1 }' \
+            | paste -sd' ' - | grep . || echo none)"
+
+    local app mode
+    while IFS=$'\t' read -r app _ mode _; do
+        [[ -n "$app" ]] || continue
+        app="$(slugify "$app")"
+        printf '  app %-16s mode=%-5s %s.local resolves=%s\n' "$app" "$mode" "$app" \
+            "$(getent hosts "${app}.local" >/dev/null 2>&1 && echo yes || echo NO)"
+    done < <(discover)
 }
 
 usage() {

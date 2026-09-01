@@ -20,7 +20,7 @@ HOMEOS_VERSION="1.0.0-phase1"
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${PATH}"
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-LIB_DIR="${SCRIPT_DIR}/scripts/lib"
+LIB_DIR="${HOMEOS_LIB_DIR:-${SCRIPT_DIR}/scripts/lib}"
 
 for _lib in common preflight packages docker filesystem network samba proxy; do
     if [[ -r "${LIB_DIR}/${_lib}.sh" ]]; then
@@ -42,6 +42,7 @@ HOMEOS_ROUTE_MODE="host"
 HOMEOS_SKIP_DOCKER=""
 HOMEOS_SKIP_SAMBA=""
 HOMEOS_UNINSTALL=""
+HOMEOS_RECONFIGURE=""
 HOMEOS_PRIMARY_IFACE=""
 
 usage() {
@@ -55,6 +56,10 @@ Usage: sudo ./install.sh [options]
   --route-mode MODE   default app routing: host | path | port (default: host)
   --image-build       building a disk image in a chroot: configure everything
                       but start nothing, and defer runtime setup to first boot
+  --reconfigure       rewrite the managed configuration from this tree and
+                      reload the services that read it. Installs nothing and
+                      never touches config.yaml. Run by homeos-apply-update so
+                      that a fix to a config file can ship over the air.
   --skip-docker       assume a working Docker Engine is already installed
   --skip-samba        do not install or configure SMB file sharing
   -y, --yes           never prompt
@@ -77,6 +82,7 @@ parse_args() {
             --route-mode)  HOMEOS_ROUTE_MODE="${2:?--route-mode needs a value}"; shift 2 ;;
             --route-mode=*) HOMEOS_ROUTE_MODE="${1#*=}"; shift ;;
             --image-build) HOMEOS_IMAGE_BUILD=1; HOMEOS_ASSUME_YES=1; shift ;;
+            --reconfigure) HOMEOS_RECONFIGURE=1; HOMEOS_ASSUME_YES=1; shift ;;
             --skip-docker) HOMEOS_SKIP_DOCKER=1; shift ;;
             --skip-samba)  HOMEOS_SKIP_SAMBA=1; shift ;;
             --uninstall)   HOMEOS_UNINSTALL=1; shift ;;
@@ -346,6 +352,46 @@ ${C_GRN}${C_BOLD}HomeOS ${HOMEOS_VERSION} baked into the image.${C_RESET}
 BANNER
 }
 
+# Rewrite the managed configuration from this tree without installing anything.
+#
+# This exists because an over-the-air update could replace the daemon, the
+# dashboard and the helper scripts, but not one line of the files they read.
+# The Caddyfile, the systemd units, the udev rules and the sudoers policy are
+# written by the installer and were never revisited, so a bug in any of them
+# could only be fixed by reinstalling the appliance — which is the thing
+# updates exist to avoid.
+#
+# Deliberately a strict subset: config.yaml is not touched, because it holds
+# the operator's settings and a release has no business overwriting them.
+# Nothing is installed, no account is created, no filesystem tree is laid out.
+stage::reconfigure() {
+    log::step "Reapplying managed configuration"
+
+    # Read the appliance's identity back out of the running system rather than
+    # letting it default: rewriting the proxy for "homenas" on an appliance the
+    # operator named something else would take the dashboard off the network.
+    local cfg=/etc/homeos/config.yaml v
+    if [[ -r "$cfg" ]]; then
+        v="$(awk '/^system:/ { s = 1; next } /^[^[:space:]]/ { s = 0 }
+                   s && $1 == "hostname:" { print $2; exit }' "$cfg")"
+        [[ -n "$v" ]] && HOMEOS_HOSTNAME="$v"
+        v="$(awk '/^  default_route_mode:/ { print $2; exit }' "$cfg")"
+        [[ -n "$v" ]] && HOMEOS_ROUTE_MODE="$v"
+    fi
+    HOMEOS_PRIMARY_IFACE="$(primary_iface || true)"
+    [[ -n "$HOMEOS_PRIMARY_IFACE" ]] || HOMEOS_PRIMARY_IFACE="eth0"
+    log::info "hostname ${HOMEOS_HOSTNAME}.local, routing ${HOMEOS_ROUTE_MODE}"
+
+    net::configure_avahi
+    proxy::install
+    fs::write_logrotate
+    stage::udev
+    stage::sudoers
+    stage::systemd
+
+    log::ok "configuration reapplied"
+}
+
 stage::summary() {
     local ip; ip="$(primary_ip)"
     cat >&2 <<BANNER
@@ -427,6 +473,18 @@ stage::uninstall() {
 # --------------------------------------------------------------------------
 main() {
     parse_args "$@"
+
+    # Reconfigure runs ahead of preflight on purpose: preflight measures a
+    # machine about to be installed onto, and one of its checks is that port 80
+    # is free — which on a running appliance it is not, because this is the
+    # thing holding it.
+    if [[ -n "$HOMEOS_RECONFIGURE" ]]; then
+        [[ "$(id -u)" -eq 0 ]] || die "--reconfigure must be run as root"
+        ensure_dir /var/log/homeos 0750 root:root
+        HOMEOS_LOG_FILE=/var/log/homeos/install.log
+        stage::reconfigure
+        exit 0
+    fi
 
     # Preflight runs before anything is written, so a rejected system is left
     # exactly as it was found.

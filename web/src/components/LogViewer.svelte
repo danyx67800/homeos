@@ -20,7 +20,15 @@
   /** @type {HTMLPreElement|undefined} */ let pre = $state();
 
   async function fetchLogs() {
-    if (!app?.container_id) return;
+    // An app with no container has no logs to show. Returning quietly left an
+    // empty black box on screen with nothing to explain it, which looks exactly
+    // like a broken log viewer rather than an app that is not running.
+    if (!app?.container_id) {
+      error = 'This app has no container right now, so there is nothing to read. '
+            + 'It was either never started or its container has been removed — '
+            + 'try Restart, or reinstall it from the store.';
+      return;
+    }
     loading = !text;
     try {
       const r = await api.logs(app.container_id, 400);
@@ -42,6 +50,7 @@
   $effect(() => {
     if (!open || !app) return;
     text = '';
+    error = '';
     fetchLogs();
     const id = setInterval(fetchLogs, 3000);
     return () => clearInterval(id);

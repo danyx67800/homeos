@@ -1,0 +1,146 @@
+name: CI
+
+# Fast checks that do not need an image build. The image workflow is the only
+# thing that proves an appliance boots, but it takes twenty minutes; these catch
+# the mistakes worth catching in one.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  shell:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse every shell script
+        run: |
+          set -euo pipefail
+          fail=0
+          while IFS= read -r f; do
+            bash -n "$f" || { echo "::error file=$f::bash -n failed"; fail=1; }
+          done < <(git ls-files '*.sh' 'install.sh' 'scripts/homeos-*')
+          exit $fail
+
+      - name: Shellcheck
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          # Informational: the tree is not shellcheck-clean yet, but a new error
+          # class showing up in the log is worth seeing.
+          git ls-files '*.sh' 'install.sh' 'scripts/homeos-*' |
+            xargs shellcheck -S error -e SC1091 || true
+
+      # The reason this job exists. A Caddyfile that does not parse means an
+      # appliance with no dashboard and no way in, and the file is assembled
+      # from a template, a generated snippet and an import glob — none of which
+      # is exercised by anything short of a full image build.
+      - name: The generated Caddyfile parses
+        run: |
+          set -euo pipefail
+          curl -fsSL https://github.com/caddyserver/caddy/releases/download/v2.8.4/caddy_2.8.4_linux_amd64.tar.gz |
+            tar -xz caddy
+          sudo install -m0755 caddy /usr/local/bin/caddy
+
+          root="$(mktemp -d)"
+          export HOMEOS_PROXY_DIR="${root}/proxy"
+          export HOMEOS_PROXY_ROUTES="${root}/proxy/routes.d"
+          export HOMEOS_CADDYFILE="${root}/proxy/Caddyfile"
+          export HOMEOS_HOSTNAME=homenas
+          mkdir -p "$HOMEOS_PROXY_ROUTES"
+
+          . scripts/lib/common.sh
+          # Render what the installer writes, without needing root to do it.
+          write_file() { local p="$1"; mkdir -p "$(dirname "$p")"; cat > "$p"; }
+          ensure_dir() { mkdir -p "$1"; }
+          . scripts/lib/proxy.sh
+          proxy::write_base_config
+          proxy::write_placeholders
+
+          echo "--- ranges this runner resolves to ---"
+          lan_ranges
+          echo
+          echo "--- generated guard ---"
+          cat "${HOMEOS_PROXY_ROUTES}/00-lan.lan.caddy"
+
+          caddy validate --config "$HOMEOS_CADDYFILE" --adapter caddyfile
+          echo "base config parses"
+
+          # And with an app route present: that block imports the same snippet
+          # and is written by a different script.
+          cat > "${HOMEOS_PROXY_ROUTES}/10-jellyfin.site.caddy" <<'ROUTE'
+          http://jellyfin.local {
+          	import homeos_headers
+          	import homeos_lan_only
+          	reverse_proxy http://10.21.0.2:8096 {
+          		import homeos_upstream
+          	}
+          }
+          ROUTE
+          caddy validate --config "$HOMEOS_CADDYFILE" --adapter caddyfile
+          echo "config parses with an app route too"
+
+      # A guard that allows everything is decoration. These assert the two
+      # properties the fix depends on rather than that a file merely exists.
+      - name: The LAN guard still guards
+        run: |
+          set -euo pipefail
+          . scripts/lib/common.sh
+          ranges="$(lan_ranges)"
+          echo "ranges: $ranges"
+
+          case "$ranges" in
+            *fe80::/10*) echo "ok: IPv6 link-local is allowed" ;;
+            *) echo "::error::fe80::/10 is missing — reaching the appliance by name would 403"; exit 1 ;;
+          esac
+          case "$ranges" in
+            *private_ranges*) echo "ok: RFC1918 is allowed" ;;
+            *) echo "::error::private_ranges is missing"; exit 1 ;;
+          esac
+          case "$ranges" in
+            *0.0.0.0/0*|*::/0*) echo "::error::the guard allows the whole internet"; exit 1 ;;
+            *) echo "ok: no default route in the allow list" ;;
+          esac
+
+      # --reconfigure is what carries a config fix over the air. It is easy for
+      # it to keep parsing while quietly doing nothing, so check it runs and
+      # writes the file it exists to write.
+      - name: install.sh --reconfigure rewrites the proxy config
+        run: |
+          set -euo pipefail
+          sudo mkdir -p /etc/homeos
+          printf 'system:\n  hostname: nas-di-marco\n  domain: local\n' |
+            sudo tee /etc/homeos/config.yaml > /dev/null
+          printf 'proxy:\n  default_route_mode: path\n' |
+            sudo tee -a /etc/homeos/config.yaml > /dev/null
+
+          sudo ./install.sh --reconfigure || true
+          test -f /etc/homeos/proxy/Caddyfile ||
+            { echo "::error::reconfigure wrote no Caddyfile"; exit 1; }
+          test -f /etc/homeos/proxy/routes.d/00-lan.lan.caddy ||
+            { echo "::error::reconfigure wrote no LAN guard"; exit 1; }
+
+          # It must have taken the hostname from config.yaml, not the default.
+          grep -q 'nas-di-marco' /etc/homeos/proxy/Caddyfile ||
+            { echo "::error::reconfigure ignored the configured hostname"; exit 1; }
+          # And it must not have rewritten the operator's settings.
+          grep -q 'hostname: nas-di-marco' /etc/homeos/config.yaml ||
+            { echo "::error::reconfigure overwrote config.yaml"; exit 1; }
+          echo "reconfigure wrote the proxy config and left config.yaml alone"
+
+  backend:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.0'
+          cache-dependency-path: backend/go.sum
+      - run: go vet ./...
+        working-directory: backend
+      - run: go test ./...
+        working-directory: backend

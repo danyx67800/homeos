@@ -37,7 +37,8 @@
     rel="noopener noreferrer"
     class="panel panel-hover flex flex-col items-center gap-2 px-3 py-3.5 text-center
            {running || busy ? '' : 'opacity-60'} {app.url ? '' : 'pointer-events-none'}"
-    aria-label="Open {app.name}"
+    aria-label={app.url ? `Open ${app.name}` : `${app.name} has no web address`}
+    aria-disabled={app.url ? undefined : 'true'}
   >
     <div class="grid h-11 w-11 place-items-center overflow-hidden rounded-lg
                 bg-[rgb(var(--raised))] text-[var(--color-accent-500)]">
@@ -55,6 +56,9 @@
         <span class="h-1.5 w-1.5 shrink-0 rounded-full {status.pulse ? 'animate-pulse' : ''}"
               style="background:{status.colour}"></span>
         <span class="truncate">{status.text}</span>
+        {#if !app.url}
+          <span class="truncate">· no address</span>
+        {/if}
       </p>
     </div>
   </a>

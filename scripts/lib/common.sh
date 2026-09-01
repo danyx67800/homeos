@@ -238,6 +238,52 @@ primary_iface() {
         | awk '{for (i = 1; i <= NF; i++) if ($i == "dev") { print $(i+1); exit }}'
 }
 
+# The source ranges the proxy treats as "this house". Caddy's own
+# `private_ranges` shorthand is RFC1918 plus ::1 and fd00::/8 — it leaves out
+# IPv6 link-local, and Avahi publishes AAAA records, so a browser sent to
+# <host>.local connects from an fe80:: address and gets refused as if it came
+# from the internet. Reaching the appliance by IP worked and reaching it by name
+# did not, which is a confusing way to discover a firewall rule.
+#
+# On-link prefixes come from the kernel's own routing table rather than from
+# address arithmetic: /64 is not guaranteed, and truncating an address by hand
+# gets that wrong. A machine with a native IPv6 prefix from its ISP therefore
+# allows its own LAN without allowing the rest of the internet.
+lan_ranges() {
+    local ranges="private_ranges fe80::/10 fc00::/7 169.254.0.0/16"
+    local prefix
+    while read -r prefix; do
+        [[ -n "$prefix" ]] || continue
+        case "$prefix" in
+            default|*[!0-9a-fA-F:./]*) continue ;;   # not a bare CIDR
+            */*) ranges+=" $prefix" ;;
+        esac
+    done < <( { ip -4 route show scope link proto kernel 2>/dev/null
+                ip -6 route show scope link proto kernel 2>/dev/null
+              } | awk '{print $1}' | sort -u )
+    printf '%s' "$ranges"
+}
+
+# The Caddy snippet both the dashboard site and every generated app route
+# import. Written to a file rather than inlined so it can be regenerated when
+# the machine's addresses change without rewriting the whole Caddyfile.
+lan_only_caddy() {
+    cat <<CADDY
+# Generated - do not edit. Rewritten by homeos-proxy-sync from the host's own
+# on-link prefixes; see lan_ranges() in scripts/lib/common.sh.
+(homeos_lan_only) {
+	@homeos_external not remote_ip $(lan_ranges)
+	handle @homeos_external {
+		# Naming the address turns "it just says no" into something the
+		# reader can act on: an address that is not in the list above is
+		# either a genuinely remote client or a network this machine does
+		# not know it is on.
+		respond "HomeOS is reachable from the local network only. Your address {remote_host} is not one this appliance recognises as local." 403
+	}
+}
+CADDY
+}
+
 port_in_use() {
     local port="$1"
     if have ss; then

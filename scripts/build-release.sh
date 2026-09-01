@@ -82,6 +82,11 @@ for arch in "${ARCHES[@]}"; do
     # changed unit; the applier reloads systemd after the swap.
     cp -r config/systemd config/udev config/sudoers "${stage}/config/"
 
+    # The installer travels with the release so that homeos-apply-update can run
+    # its --reconfigure path. Without it an update can replace every executable
+    # and still not fix a line in the Caddyfile the executables read.
+    cp install.sh "${stage}/"
+
     cp -r web/dist "${stage}/web"
     printf '%s\n' "$VERSION" > "${stage}/VERSION"
 

@@ -101,6 +101,28 @@ fi
 swap_to "$TARGET"
 log "symlink now points at ${VERSION}"
 
+# Reapply the configuration the new release describes: the Caddyfile, the
+# systemd units, the udev rules and the sudoers policy. Done after the swap and
+# before the restart so the health check below covers it — a release that writes
+# a config the appliance cannot serve is rolled back with everything else,
+# rather than leaving a working binary behind a broken proxy.
+#
+# A failure here is not fatal on its own. The previous configuration is still in
+# place and still works; it is the health check that decides.
+if [[ -x "${TARGET}/install.sh" ]]; then
+    # pipefail is set, so a failing installer still fails the pipeline even
+    # though logger(1) exits cleanly.
+    if HOMEOS_LIB_DIR="${TARGET}/scripts" HOMEOS_QUIET=1 \
+           "${TARGET}/install.sh" --reconfigure 2>&1 \
+       | logger -t homeos-reconfigure; then
+        log "configuration reapplied from ${VERSION}"
+    else
+        log "reconfigure failed; continuing with the configuration already in place"
+    fi
+else
+    log "release ${VERSION} carries no installer; configuration left as it is"
+fi
+
 # --------------------------------------------------------------------------
 # Restart and verify
 # --------------------------------------------------------------------------

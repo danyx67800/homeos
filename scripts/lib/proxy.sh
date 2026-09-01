@@ -11,9 +11,11 @@
 [[ -n "${_HOMEOS_PROXY_SH:-}" ]] && return 0
 _HOMEOS_PROXY_SH=1
 
-HOMEOS_PROXY_DIR=/etc/homeos/proxy
-HOMEOS_PROXY_ROUTES="${HOMEOS_PROXY_DIR}/routes.d"
-HOMEOS_CADDYFILE="${HOMEOS_PROXY_DIR}/Caddyfile"
+# Overridable so the layout can be rendered somewhere writable and fed to
+# `caddy validate` without root; the appliance never sets these.
+HOMEOS_PROXY_DIR="${HOMEOS_PROXY_DIR:-/etc/homeos/proxy}"
+HOMEOS_PROXY_ROUTES="${HOMEOS_PROXY_ROUTES:-${HOMEOS_PROXY_DIR}/routes.d}"
+HOMEOS_CADDYFILE="${HOMEOS_CADDYFILE:-${HOMEOS_PROXY_DIR}/Caddyfile}"
 
 proxy::install() {
     log::step "Reverse proxy (Caddy)"
@@ -85,6 +87,12 @@ CONF
 # Placeholder so `import *.path.caddy` always matches at least one file.
 # Path-mode app routes are written here by homeos-proxy-sync.
 CONF
+    # Not a placeholder: this one defines the snippet every site block imports,
+    # so Caddy cannot start without it. homeos-proxy-sync rewrites it on each
+    # run, which is how a changed LAN or a new IPv6 prefix gets picked up.
+    write_file "${HOMEOS_PROXY_ROUTES}/00-lan.lan.caddy" 0644 root:root <<CONF
+$(lan_only_caddy)
+CONF
 }
 
 proxy::write_base_config() {
@@ -133,15 +141,17 @@ proxy::write_base_config() {
 	}
 }
 
-# Refuse anything that did not come from RFC1918 space or loopback. Remove this
-# import from the site blocks below if you front HomeOS with your own VPN or
-# tunnel that presents public source addresses.
-(homeos_lan_only) {
-	@homeos_external not remote_ip private_ranges
-	handle @homeos_external {
-		respond "HomeOS is reachable from the local network only." 403
-	}
-}
+# Refuse anything that did not arrive from this machine's own networks.
+#
+# The range list is NOT hardcoded here: Caddy's `private_ranges` covers RFC1918
+# and ::1 but not fe80::/10, and Avahi publishes AAAA records, so a browser
+# asked for ${HOMEOS_HOSTNAME}.local resolves to an IPv6 address and is then
+# refused as external. homeos-proxy-sync writes the list from the host's own
+# on-link prefixes and rewrites it whenever it runs.
+#
+# Remove these imports from the site blocks below if you front HomeOS with your
+# own VPN or tunnel that presents public source addresses.
+import ${HOMEOS_PROXY_ROUTES}/*.lan.caddy
 
 # Applied to every proxied app: preserves the client address for the upstream
 # and disables buffering so SSE and websockets stream rather than stall.
