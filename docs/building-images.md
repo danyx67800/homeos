@@ -18,10 +18,23 @@ on native `amd64` and `arm64` runners, in about nine minutes each.
 
 ```bash
 gh workflow run image.yml -f version=1.0.0
-gh workflow run image.yml -f version=1.0.0 -f publish=true   # also draft a release
 ```
 
-Pushing a `v*` tag builds and drafts a release automatically.
+The images are attached to a **draft release**, which is where you download
+them. They cannot be Actions artifacts: at roughly a gigabyte per architecture
+they would exhaust the storage quota in two runs, while release assets do not
+count against it.
+
+The draft is visible only to you until you publish it. Pushing a `v*` tag does
+the same thing automatically.
+
+```bash
+gh release list
+gh release download v1.0.0 --pattern '*.iso'
+```
+
+Passing `-f publish=false` builds and verifies without keeping anything — useful
+for checking that a change still builds, and nothing else.
 
 **Locally**, on a Linux machine with root — `debootstrap`, loop devices and
 `chroot` have no equivalent on macOS or Windows:

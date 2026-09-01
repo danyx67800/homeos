@@ -9,9 +9,9 @@ on:
         required: false
         default: 'dev'
       publish:
-        description: 'Attach the results to a GitHub release'
+        description: 'Attach the images to a draft release (they are discarded otherwise)'
         type: boolean
-        default: false
+        default: true
   push:
     tags: ['v*']
 
@@ -150,9 +150,10 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: homeos-${{ matrix.arch }}
-          # The image and ISO together are well over the comfortable artifact
-          # size; only the checksums are kept for inspection, and the real
-          # delivery is the release below.
+          # Only the checksums. The image and the ISO are ~1 GB per
+          # architecture, which would exhaust the Actions storage quota in a
+          # couple of runs; they go to a release instead, where they do not
+          # count against it.
           path: |
             dist/*.sha256
           retention-days: 7
@@ -168,3 +169,28 @@ jobs:
             dist/*.img.xz.sha256
             dist/*.iso
             dist/*.iso.sha256
+
+      - name: Say where the artefacts went
+        if: always()
+        run: |
+          {
+            echo "### HomeOS ${{ steps.v.outputs.version }} — ${{ matrix.arch }}"
+            echo
+            if [ -f "dist/${IMG_NAME}.iso" ]; then
+              echo "| Artefact | Size |"
+              echo "|---|---|"
+              for f in "dist/${IMG_NAME}.img.xz" "dist/${IMG_NAME}.iso"; do
+                [ -f "$f" ] && echo "| \`$(basename "$f")\` | $(du -h "$f" | cut -f1) |"
+              done
+              echo
+            fi
+            if [ "${{ startsWith(github.ref, 'refs/tags/v') || inputs.publish }}" = "true" ]; then
+              echo "Attached to the **draft release**: <${{ github.server_url }}/${{ github.repository }}/releases>"
+              echo
+              echo "It is a draft, so it is only visible to you until you publish it."
+            else
+              echo "> **Not published.** \`publish\` was false, so these were built,"
+              echo "> verified and then discarded with the runner. Re-run with"
+              echo "> \`publish\` enabled to keep them."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
