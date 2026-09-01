@@ -106,6 +106,24 @@ for (const [tab, route, marker] of [
     ? ok(`${tab} marked as the current tab`)
     : bad(`aria-current = [${current}] while on ${tab}`);
 
+  // Every category chip must lead somewhere. The row used to be a fixed list of
+  // twelve, so a six-app catalogue offered seven filters that emptied the grid.
+  if (tab === 'Store') {
+    const chips = await page.$eval(
+      '.chip', (els) => els.map((e) => e.textContent.trim()));
+    let dead = [];
+    for (const label of chips) {
+      await page.click(`button.chip:has-text("${label}")`);
+      await page.waitForTimeout(80);
+      const cards = await page.$eval('main button.panel', (e) => e.length);
+      if (!cards) dead.push(label);
+    }
+    dead.length ? bad(`store categories with no apps: ${dead.join(', ')}`)
+                : ok(`all ${chips.length} store filters lead to apps`);
+    await page.click('button.chip:has-text("All")');
+    await page.waitForTimeout(120);
+  }
+
   await page.waitForTimeout(250);
   await shot(page, `3-${tab.toLowerCase()}`);
 }

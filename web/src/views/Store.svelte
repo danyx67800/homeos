@@ -7,20 +7,16 @@
 
   let { focusApp = null, onnavigate = () => {} } = $props();
 
-  const CATEGORIES = [
-    { id: '', label: 'All' },
-    { id: 'media', label: 'Media' },
-    { id: 'productivity', label: 'Productivity' },
-    { id: 'networking', label: 'Networking' },
-    { id: 'automation', label: 'Automation' },
-    { id: 'storage', label: 'Storage' },
-    { id: 'developer', label: 'Developer' },
-    { id: 'monitoring', label: 'Monitoring' },
-    { id: 'security', label: 'Security' },
-    { id: 'communication', label: 'Communication' },
-    { id: 'games', label: 'Games' },
-    { id: 'other', label: 'Other' },
-  ];
+  // Labels for the categories a manifest may declare. The chip row is built
+  // from the catalogue rather than from this list: a chip that leads to an
+  // empty grid is a promise the store cannot keep, and a six-app catalogue
+  // showing twelve categories reads as broken rather than as small.
+  const LABELS = {
+    media: 'Media', productivity: 'Productivity', networking: 'Networking',
+    automation: 'Automation', storage: 'Storage', developer: 'Developer',
+    monitoring: 'Monitoring', security: 'Security',
+    communication: 'Communication', games: 'Games', other: 'Other',
+  };
 
   let apps = $state([]);
   let rejected = $state({});
@@ -30,6 +26,21 @@
   let category = $state('');
   let query = $state('');
   let refreshing = $state(false);
+
+  const categories = $derived.by(() => {
+    const seen = new Set(apps.map((a) => a.category).filter(Boolean));
+    const known = Object.keys(LABELS).filter((id) => seen.has(id));
+    // Anything the catalogue declares that we have no label for still gets a
+    // chip, titled as it came, rather than becoming an unreachable app.
+    const extra = [...seen].filter((id) => !(id in LABELS)).sort();
+    const list = [...known, ...extra].map((id) => ({ id, label: LABELS[id] ?? id }));
+    return list.length > 1 ? [{ id: '', label: 'All' }, ...list] : [];
+  });
+
+  // Icons are fetched from the catalogue's own URLs, and an appliance is often
+  // the least connected machine in the house. A failed fetch falls back to the
+  // initial rather than leaving the browser's broken-image glyph on the card.
+  let iconFailed = $state({});
 
   let detail = $state(null);   // the full manifest of the open app
   let detailOpen = $state(false);
@@ -140,8 +151,9 @@
 
 <!-- Category filter. A horizontal scroller rather than a dropdown: on a phone
      the categories stay one tap away instead of two. -->
+{#if categories.length}
 <div class="mb-5 -mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
-  {#each CATEGORIES as c (c.id)}
+  {#each categories as c (c.id)}
     <button
       class="chip shrink-0 transition-colors
              {category === c.id
@@ -151,6 +163,7 @@
     >{c.label}</button>
   {/each}
 </div>
+{/if}
 
 {#if error}
   <div class="panel flex items-center gap-3 p-5 text-sm text-[var(--color-bad)]">
@@ -178,8 +191,10 @@
               onclick={() => openDetail(app.id)}>
         <div class="grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-xl
                     bg-[rgb(var(--surface))] ring-1 ring-[rgb(var(--line)/0.12)]">
-          {#if app.icon}
-            <img src={api.storeIconUrl(app.id)} alt="" class="h-8 w-8 object-contain" loading="lazy" />
+          {#if app.icon && !iconFailed[app.id]}
+            <img src={api.storeIconUrl(app.id)} alt="" class="h-8 w-8 object-contain"
+                 loading="lazy"
+                 onerror={() => (iconFailed = { ...iconFailed, [app.id]: true })} />
           {:else}
             <span class="text-lg font-semibold text-[var(--color-accent-400)]">
               {app.name.charAt(0)}
