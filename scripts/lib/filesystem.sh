@@ -65,8 +65,10 @@ fs::create_tree() {
 
     # --- Program code: replaced wholesale by an OTA update ------------------
     ensure_dir /usr/lib/homeos                0755 root:root
-    ensure_dir /usr/lib/homeos/bin            0755 root:root
-    ensure_dir /usr/lib/homeos/scripts        0755 root:root
+    ensure_dir /usr/lib/homeos/releases       0755 root:root
+    # bin and scripts are deliberately NOT created here: stage::runtime_files
+    # makes them symlinks into the current release, which is what lets an
+    # over-the-air update swap everything by moving one link.
     ensure_dir /opt/homeos                    0755 root:root
     ensure_dir /opt/homeos/web                0755 root:root
 

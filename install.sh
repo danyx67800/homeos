@@ -185,14 +185,34 @@ stage::runtime_files() {
 # ln -sfn writes the link and renames it over any existing one. Without -n, ln
 # would follow an existing symlink and create the new one *inside* the directory
 # it points at, which is how these layouts usually break.
+# fs::link <name> <target> <dir> — make dir/name a symlink to target, atomically.
+#
+# ln -sfn writes the link and renames it over any existing one. Without -n, ln
+# follows an existing symlink and creates the new one *inside* the directory it
+# points at, which is how these layouts usually break.
 fs::link() {
     local name="$1" target="$2" dir="$3"
-    if [[ -e "${dir}/${name}" && ! -L "${dir}/${name}" ]]; then
-        die "${dir}/${name} exists and is not a symlink; move it aside and re-run"
+    local path="${dir}/${name}"
+
+    # An installation from before the release layout existed has a real
+    # directory here. Its contents belong in the release the link will point
+    # at, so move them rather than refusing to continue.
+    if [[ -d "$path" && ! -L "$path" ]]; then
+        local resolved="${dir}/${target}"
+        [[ "$target" == /* ]] && resolved="$target"
+        log::info "migrating ${path} into ${resolved}"
+        run mkdir -p "$resolved"
+        if [[ -n "$(ls -A "$path" 2>/dev/null)" ]]; then
+            run cp -a "${path}/." "${resolved}/"
+        fi
+        run rm -rf "$path"
+    elif [[ -e "$path" && ! -L "$path" ]]; then
+        die "${path} exists and is neither a symlink nor a directory; move it aside and re-run"
     fi
-    run ln -sfn "$target" "${dir}/${name}.homeos-new"
-    run mv -Tf "${dir}/${name}.homeos-new" "${dir}/${name}"
-    log::ok "${dir}/${name} -> ${target}"
+
+    run ln -sfn "$target" "${path}.homeos-new"
+    run mv -Tf "${path}.homeos-new" "$path"
+    log::ok "${path} -> ${target}"
 }
 
 stage::udev() {
