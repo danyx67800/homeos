@@ -190,15 +190,40 @@ in_chroot "/usr/lib/homeos/bin/homeos-core -version" \
 # --------------------------------------------------------------------------
 # First boot
 # --------------------------------------------------------------------------
+step "Console"
+install -D -m 0755 "${REPO_ROOT}/scripts/homeos-console"     "${ROOTFS}/usr/lib/homeos/bin/homeos-console"
+
+# tty1 shows status instead of a login prompt. An appliance's screen should say
+# what its address is and whether it is working; a bare "homenas login:" says
+# neither, and root is locked so nobody can get past it anyway.
+mkdir -p "${ROOTFS}/etc/systemd/system/getty@tty1.service.d"
+cat > "${ROOTFS}/etc/systemd/system/getty@tty1.service.d/homeos-console.conf" <<'GETTY'
+[Service]
+ExecStart=
+ExecStart=-/sbin/agetty --autologin root --noclear %I $TERM
+Type=idle
+GETTY
+
+cat > "${ROOTFS}/root/.bash_profile" <<'PROFILE'
+# The console screen on tty1 only. A serial console or SSH gets a normal shell,
+# which is what you want when you are deliberately debugging.
+if [ "$(tty)" = "/dev/tty1" ] && [ -x /usr/lib/homeos/bin/homeos-console ]; then
+    exec /usr/lib/homeos/bin/homeos-console
+fi
+PROFILE
+
 step "First-boot wiring"
 in_chroot "systemctl enable homeos-firstboot homeos-core homeos-proxy-sync >/dev/null 2>&1" || true
 # Belt and braces: install.sh already refuses to write this in image mode, but
 # an image that skips first boot ships with cloned SSH host keys.
 rm -f "${ROOTFS}/var/lib/homeos/.firstboot-done"
 
-# A fresh appliance has no root password and no user. Access is the dashboard
-# and, for anyone who needs it, SSH with a key they add themselves.
-in_chroot "passwd -l root >/dev/null 2>&1" || true
+# No password is ever set, so SSH cannot authenticate as root and the account
+# is unusable remotely. It is deliberately not *locked*, because locking it
+# stops the physical console autologin too — which left the appliance with no
+# way in at all when something went wrong.
+in_chroot "passwd -d root >/dev/null 2>&1" || true
+sed -i 's/^#*PermitRootLogin.*/PermitRootLogin prohibit-password/'     "${ROOTFS}/etc/ssh/sshd_config" 2>/dev/null || true
 
 # --------------------------------------------------------------------------
 # Slim down
@@ -210,6 +235,11 @@ rm -rf "${ROOTFS}/opt/homeos-src" \
        "${ROOTFS}/var/cache/apt"/*.bin \
        "${ROOTFS}/tmp"/* \
        "${ROOTFS}/var/tmp"/*
+# The build host's resolv.conf was copied in so apt could reach the network.
+# Leaving it there ships the runner's nameserver to every appliance, and every
+# DNS lookup on the user's network fails. systemd-resolved owns this at runtime.
+ln -sfn /run/systemd/resolve/stub-resolv.conf "${ROOTFS}/etc/resolv.conf"
+
 : > "${ROOTFS}/etc/machine-id"          # regenerated per machine on first boot
 rm -f "${ROOTFS}"/etc/ssh/ssh_host_*    # regenerated per machine on first boot
 find "${ROOTFS}/var/log" -type f -delete 2>/dev/null || true

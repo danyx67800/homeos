@@ -199,8 +199,19 @@ svc_reload_units() {
 
 svc_enable_now() {
     local unit="$1"
-    systemd_available || { log::warn "systemd unavailable; not enabling $unit"; return 0; }
+
+    # `systemctl enable` only writes symlinks into the unit tree, so it works
+    # perfectly well against a root filesystem whose systemd is not running —
+    # which is exactly what an image build is. Only *starting* needs a live
+    # systemd. Conflating the two meant an image shipped with avahi-daemon and
+    # homeos-proxy-sync installed, configured, and never enabled.
     run systemctl enable "$unit" >/dev/null 2>&1 || log::warn "could not enable $unit"
+
+    if ! systemd_available; then
+        log::skip "enabled $unit; not starting it (systemd is not running here)"
+        return 0
+    fi
+
     if run systemctl restart "$unit"; then
         log::ok "$unit active"
     else

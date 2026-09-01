@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+#
+# homeos-console — what an appliance shows on the screen it is plugged into.
+#
+# A headless box that boots to a bare login prompt tells you nothing: not its
+# address, not whether it is working, and not what to do next. This is what
+# runs on tty1 instead.
+#
+# It also has to work when things are broken, because that is when somebody is
+# standing in front of the machine. So it reports service state plainly and
+# always offers a shell.
+#
+set -uo pipefail
+
+B=$'\033[1m'; D=$'\033[2m'; G=$'\033[32m'; Y=$'\033[33m'; R=$'\033[31m'; C=$'\033[36m'; O=$'\033[0m'
+
+addresses() {
+    ip -4 -o addr show scope global 2>/dev/null \
+        | awk '{split($4,a,"/"); print $2 "\t" a[1]}'
+}
+
+svc() {
+    local unit="$1" label="$2"
+    if systemctl is-active --quiet "$unit" 2>/dev/null; then
+        printf '  %s●%s %-22s %srunning%s\n' "$G" "$O" "$label" "$G" "$O"
+    elif systemctl is-enabled --quiet "$unit" 2>/dev/null; then
+        printf '  %s●%s %-22s %senabled but not running%s\n' "$R" "$O" "$label" "$R" "$O"
+    else
+        printf '  %s●%s %-22s %snot enabled%s\n' "$D" "$O" "$label" "$D" "$O"
+    fi
+}
+
+screen() {
+    clear
+    local host; host="$(hostname 2>/dev/null || echo homenas)"
+
+    printf '\n  %sHomeOS%s' "$B" "$O"
+    [[ -r /usr/lib/homeos/current/VERSION ]] && printf '  %s%s%s' "$D" "$(cat /usr/lib/homeos/current/VERSION)" "$O"
+    printf '\n\n'
+
+    # The address first: it is the one thing somebody standing here needs.
+    local any=0
+    while IFS=$'\t' read -r iface addr; do
+        [[ -z "$addr" ]] && continue
+        any=1
+        printf '    %shttp://%s%s%s   %s(%s)%s\n' "$C" "$addr" "$O" "" "$D" "$iface" "$O"
+    done < <(addresses)
+
+    if (( any )); then
+        printf '    %shttp://%s.local%s   %sif your network passes mDNS%s\n' "$C" "$host" "$O" "$D" "$O"
+    else
+        printf '    %sNo network address.%s The cable or DHCP is the place to look.\n' "$R" "$O"
+        printf '    %sip link%s shows the interfaces this machine can see.\n' "$D" "$O"
+    fi
+
+    printf '\n  %sServices%s\n' "$B" "$O"
+    svc homeos-core.service       "Dashboard and API"
+    svc caddy.service             "Web server"
+    svc docker.service            "Containers"
+    svc homeos-proxy-sync.service "App routing"
+    svc avahi-daemon.service      ".local name"
+    svc smbd.service              "File sharing"
+
+    # First boot does the work that makes the box usable; saying so stops
+    # people rebooting in the middle of it.
+    if [[ ! -e /var/lib/homeos/.firstboot-done ]]; then
+        printf '\n  %sFirst boot is still finishing.%s Give it a minute.\n' "$Y" "$O"
+    fi
+
+    if ! systemctl is-active --quiet homeos-core.service 2>/dev/null; then
+        printf '\n  %sThe dashboard is not answering.%s Why:\n' "$R" "$O"
+        printf '    %sjournalctl -u homeos-core -n 40%s\n' "$D" "$O"
+    fi
+
+    printf '\n  %s[r]%s refresh   %s[s]%s shell   %s[l]%s logs   %s[p]%s poweroff   %s[b]%s reboot\n\n' \
+        "$B" "$O" "$B" "$O" "$B" "$O" "$B" "$O" "$B" "$O"
+}
+
+while true; do
+    screen
+    # Times out so the display refreshes on its own: the address appears by
+    # itself once DHCP finishes, without anyone touching the keyboard.
+    read -rsn1 -t 20 key || key=r
+    case "$key" in
+        s) printf '\n  Type exit to come back.\n\n'; /bin/bash --login ;;
+        l) journalctl -u homeos-core -u caddy -u homeos-proxy-sync -n 60 --no-pager | less ;;
+        p) systemctl poweroff ;;
+        b) systemctl reboot ;;
+        *) ;;
+    esac
+done

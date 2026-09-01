@@ -147,6 +147,68 @@ jobs:
           file "dist/${IMG_NAME}.iso" | grep -qi 'ISO 9660' \
             || { echo "::error::the ISO is not an ISO 9660 image"; exit 1; }
 
+      - name: Boot the image and check the dashboard answers
+        timeout-minutes: 20
+        run: |
+          set -euo pipefail
+          # An image that builds is not an image that boots. This is the only
+          # check that exercises the bootloader, the kernel, first boot, and
+          # every service actually coming up — which is exactly the ground
+          # where a build-only pipeline ships something broken.
+          IMG="${{ runner.temp }}/boot-test.img"
+          xzcat "dist/${IMG_NAME}.img.xz" > "$IMG"
+          # Room for the root filesystem to grow into, as it would on real
+          # hardware; a full disk on first boot is its own failure mode.
+          qemu-img resize -f raw "$IMG" 8G
+
+          case "${{ matrix.arch }}" in
+            amd64)
+              FW=/usr/share/OVMF/OVMF_CODE.fd
+              [ -f "$FW" ] || FW=/usr/share/ovmf/OVMF.fd
+              QEMU=(qemu-system-x86_64 -machine q35 -cpu max -bios "$FW")
+              ;;
+            arm64)
+              FW=/usr/share/AAVMF/AAVMF_CODE.fd
+              [ -f "$FW" ] || FW=/usr/share/qemu-efi-aarch64/QEMU_EFI.fd
+              QEMU=(qemu-system-aarch64 -machine virt -cpu max -bios "$FW")
+              ;;
+          esac
+          # KVM when the runner offers it, TCG when it does not. Nested
+          # virtualisation is not guaranteed on hosted runners.
+          [ -w /dev/kvm ] && QEMU+=(-enable-kvm) && echo "using KVM" || echo "using TCG (slower)"
+
+          "${QEMU[@]}" -m 2048 -smp 2 -nographic -no-reboot \
+            -drive "file=${IMG},format=raw,if=virtio" \
+            -netdev "user,id=n0,hostfwd=tcp::8080-:80,hostfwd=tcp::2222-:22" \
+            -device virtio-net-pci,netdev=n0 \
+            -serial file:"${{ runner.temp }}/boot.log" \
+            -daemonize -pidfile "${{ runner.temp }}/qemu.pid"
+
+          echo "Waiting for the dashboard..."
+          ok=0
+          for i in $(seq 1 90); do
+            if curl -fsS --max-time 3 http://127.0.0.1:8080/api/v1/health >/tmp/health.json 2>/dev/null; then
+              ok=1; break
+            fi
+            sleep 10
+            [ $((i % 6)) -eq 0 ] && echo "  ${i}0s..."
+          done
+
+          echo "::group::serial console"
+          tail -120 "${{ runner.temp }}/boot.log" || true
+          echo "::endgroup::"
+
+          kill "$(cat "${{ runner.temp }}/qemu.pid")" 2>/dev/null || true
+
+          if [ "$ok" != "1" ]; then
+            echo "::error::the image booted but nothing answered on port 80 within 15 minutes"
+            exit 1
+          fi
+          echo "Dashboard answered:"
+          cat /tmp/health.json
+          grep -q '"status":"ok"' /tmp/health.json \
+            || { echo "::error::/api/v1/health did not report ok"; exit 1; }
+
       - uses: actions/upload-artifact@v4
         with:
           name: homeos-${{ matrix.arch }}
