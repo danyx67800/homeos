@@ -100,13 +100,17 @@ jobs:
       - name: Build the backend and the dashboard
         env:
           VERSION: ${{ steps.v.outputs.version }}
+          # Without the public key, the appliance this image produces can never
+          # accept an over-the-air update: the updater refuses to verify against
+          # a key it does not have rather than skipping verification.
+          PUBKEY: ${{ secrets.HOMEOS_PUBLIC_KEY }}
         run: |
           set -euo pipefail
           mkdir -p dist
           # Built on the runner, not in the chroot: cross-compiling a static Go
           # binary is faster and keeps a compiler out of the image.
           ( cd backend && CGO_ENABLED=0 GOOS=linux GOARCH=${{ matrix.arch }} \
-              go build -trimpath -ldflags "-s -w -X main.Version=${VERSION}" \
+              go build -trimpath -ldflags "-s -w -X main.Version=${VERSION} -X main.UpdatePublicKey=${PUBKEY}" \
               -o "../dist/homeos-core-linux-${{ matrix.arch }}" ./cmd/homeos-core )
           ( cd web && npm ci && npm run build )
           ls -la dist/ web/dist/index.html
