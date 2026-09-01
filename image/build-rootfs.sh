@@ -41,7 +41,7 @@ DEBOOTSTRAP_ARGS=(
     --variant=minbase
     # ca-certificates and the apt plumbing have to exist before install.sh can
     # add the Docker and Caddy repositories.
-    --include=systemd,systemd-sysv,dbus,ca-certificates,apt-transport-https,gnupg,curl,sudo,locales,less,nano,openssh-server
+    --include=systemd,systemd-sysv,dbus,ca-certificates,apt-transport-https,gnupg,curl,sudo,locales,tzdata,less,nano,openssh-server
 )
 
 if [[ "$ARCH" != "$(dpkg --print-architecture)" ]]; then

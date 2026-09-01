@@ -280,12 +280,23 @@ stage::systemd() {
 stage::timezone() {
     [[ -n "$HOMEOS_TZ" ]] || return 0
     log::step "Timezone"
-    if timedatectl list-timezones 2>/dev/null | grep -qxF "$HOMEOS_TZ"; then
-        run timedatectl set-timezone "$HOMEOS_TZ"
-        log::ok "timezone set to $HOMEOS_TZ"
-    else
-        die "unknown timezone: $HOMEOS_TZ (see: timedatectl list-timezones)"
+
+    # Set it the way timedatectl does underneath — a symlink to the zoneinfo
+    # file — rather than through timedatectl itself, which needs a running
+    # systemd and a dbus. That is never true inside a chroot, and validating a
+    # timezone by asking a daemon that is not there is how the image build
+    # failed on a name as ordinary as UTC.
+    local zone="/usr/share/zoneinfo/${HOMEOS_TZ}"
+    if [[ ! -f "$zone" ]]; then
+        die "unknown timezone: ${HOMEOS_TZ}
+     No such file ${zone}. Valid names look like Europe/Rome or Etc/UTC;
+     list them with: find /usr/share/zoneinfo -type f -printf '%P\n' | sort"
     fi
+
+    run ln -sfn "$zone" /etc/localtime.homeos-new
+    run mv -Tf /etc/localtime.homeos-new /etc/localtime
+    printf '%s\n' "$HOMEOS_TZ" | write_file /etc/timezone 0644 root:root >/dev/null || true
+    log::ok "timezone set to ${HOMEOS_TZ}"
 }
 
 # A chroot has no address to advertise and nothing running to report on.
