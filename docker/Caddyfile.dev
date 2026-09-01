@@ -1,0 +1,52 @@
+# Development front door.
+#
+# Mirrors the routing phase 1 installs on an appliance, so a bug that only shows
+# up behind the proxy — a websocket upgrade, an SSE buffer, an SPA deep link —
+# reproduces here rather than in production.
+#
+# Two differences, both deliberate: the RFC1918 guard is off (Docker's bridge
+# addresses are private anyway, and it would only get in the way), and the
+# dashboard is proxied to the Vite dev server instead of served from disk.
+
+{
+	admin 0.0.0.0:2019
+	auto_https off
+	persist_config off
+	log default {
+		format console
+		level INFO
+	}
+}
+
+(homeos_upstream) {
+	header_up X-Real-IP {remote_host}
+	header_up X-Forwarded-Host {host}
+	flush_interval -1
+}
+
+:80 {
+	encode zstd gzip
+
+	handle /api/* {
+		reverse_proxy backend:8790 {
+			import homeos_upstream
+		}
+	}
+	handle /ws/* {
+		reverse_proxy backend:8790 {
+			import homeos_upstream
+		}
+	}
+	handle /events* {
+		reverse_proxy backend:8790 {
+			import homeos_upstream
+		}
+	}
+
+	# Vite serves the dashboard and its own HMR websocket.
+	handle {
+		reverse_proxy web:5173 {
+			import homeos_upstream
+		}
+	}
+}

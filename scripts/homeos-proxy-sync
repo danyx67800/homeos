@@ -1,0 +1,410 @@
+#!/usr/bin/env bash
+#
+# homeos-proxy-sync — project published Docker containers onto Caddy routes.
+#
+# A container opts in with labels; this script turns those into route files
+# under /etc/homeos/proxy/routes.d and reloads Caddy. It is the only writer of
+# that directory. Run it once (`sync`) or supervise it (`watch`) so it reacts to
+# Docker lifecycle events.
+#
+#   homeos.enable        true                     required, opts the container in
+#   homeos.app           jellyfin                 slug; defaults to container name
+#   homeos.title         Jellyfin                 display name for the dashboard
+#   homeos.port          8096                     container port; auto-detected
+#                                                 from EXPOSE when there is one
+#   homeos.scheme        http | https             upstream scheme, default http
+#   homeos.route         host | path | port       default from config.yaml
+#   homeos.public_port   8096                     listen port, port mode only
+#   homeos.strip_prefix  true | false             path mode, default true
+#
+# Route modes:
+#   host   http://<app>.local/            mDNS alias published automatically
+#   path   http://<host>.local/app/<app>/ no DNS work, needs base-path support
+#   port   http://<host>.local:<port>/    proxy still terminates and logs
+#
+set -euo pipefail
+
+HOMEOS_LIB="${HOMEOS_LIB:-/usr/lib/homeos/scripts}"
+# shellcheck source=lib/common.sh
+if [[ -r "${HOMEOS_LIB}/common.sh" ]]; then
+    . "${HOMEOS_LIB}/common.sh"
+elif [[ -r "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh" ]]; then
+    . "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
+else
+    echo "homeos-proxy-sync: cannot locate common.sh" >&2
+    exit 1
+fi
+
+HOMEOS_LOG_FILE="${HOMEOS_LOG_FILE:-/var/log/homeos/proxy-sync.log}"
+
+CONFIG_FILE="${HOMEOS_CONFIG:-/etc/homeos/config.yaml}"
+ROUTES_DIR="${HOMEOS_ROUTES_DIR:-/etc/homeos/proxy/routes.d}"
+CADDYFILE="${HOMEOS_CADDYFILE:-/etc/homeos/proxy/Caddyfile}"
+EDGE_NET="${HOMEOS_EDGE_NET:-homeos-edge}"
+STAGE_ROOT="${HOMEOS_STAGE_DIR:-/var/lib/homeos/tmp}"
+
+# Read one scalar out of config.yaml without pulling in a YAML parser. Only used
+# for a handful of flat keys we control the formatting of.
+cfg() {
+    local key="$1" default="${2:-}" val=""
+    if [[ -r "$CONFIG_FILE" ]]; then
+        val="$(sed -n "s/^[[:space:]]*${key}:[[:space:]]*//p" "$CONFIG_FILE" \
+               | head -n1 | sed -e 's/[[:space:]]*#.*$//' -e 's/^"//' -e 's/"$//')"
+    fi
+    printf '%s' "${val:-$default}"
+}
+
+DEFAULT_MODE="$(cfg default_route_mode host)"
+PUBLISH_ALIASES="$(cfg publish_mdns_aliases true)"
+BASE_HOST="$(cfg hostname homenas)"
+
+# --------------------------------------------------------------------------
+# Discovery
+# --------------------------------------------------------------------------
+
+# Emit one TSV record per opted-in running container:
+#   app  title  mode  scheme  upstream_host  upstream_port  public_port  strip  container
+#
+# Upstream resolution, in order of preference:
+#   1. the container's IP on the edge network  (stable path, no host ports)
+#   2. a published host port for the app port  (containers outside the fabric)
+#   3. the container's IP on any other bridge  (last resort)
+# Caddy runs on the host, so container *names* are not resolvable here; the
+# address is baked into the route file and refreshed on every Docker event.
+discover() {
+    local ids
+    ids="$(docker ps --filter "label=homeos.enable" --format '{{.ID}}' 2>/dev/null || true)"
+    [[ -n "$ids" ]] || return 0
+
+    # shellcheck disable=SC2086
+    docker inspect $ids 2>/dev/null | jq -r \
+        --arg edge "$EDGE_NET" \
+        --arg defmode "$DEFAULT_MODE" '
+        def lbl($k): (.Config.Labels // {})[$k] // "";
+        def truthy: (. // "") | ascii_downcase | . == "true" or . == "1" or . == "yes" or . == "on";
+
+        .[]
+        | select(lbl("homeos.enable") | truthy)
+        | select(.State.Running == true)
+        | . as $c
+        | (lbl("homeos.app")
+           | if . == "" then ($c.Name | ltrimstr("/")) else . end) as $app
+        | (lbl("homeos.port")
+           | if . != "" then .
+             else ([($c.Config.ExposedPorts // {}) | keys[]
+                    | select(endswith("/tcp")) | split("/")[0]]
+                   | sort_by(tonumber) | first // "")
+             end) as $port
+        | select($port != "")
+        | ($c.NetworkSettings.Networks // {}) as $nets
+        | (($nets[$edge] // {}).IPAddress // "") as $edgeip
+        | ([$nets[] | .IPAddress // "" | select(. != "")] | first // "") as $anyip
+        | ((($c.NetworkSettings.Ports // {})[$port + "/tcp"] // [])
+           | map(select((.HostPort // "") != "")) | (first // {}).HostPort // "") as $hostport
+        | (if   $edgeip   != "" then [$edgeip, $port]
+           elif $hostport != "" then ["127.0.0.1", $hostport]
+           elif $anyip    != "" then [$anyip, $port]
+           else null end) as $up
+        | select($up != null)
+        | [ $app,
+            (lbl("homeos.title") | if . == "" then $app else . end),
+            (lbl("homeos.route") | if . == "" then $defmode else . end),
+            (lbl("homeos.scheme") | if . == "" then "http" else . end),
+            $up[0],
+            $up[1],
+            (lbl("homeos.public_port") | if . == "" then $port else . end),
+            (lbl("homeos.strip_prefix") | if . == "" then "true" else . end),
+            ($c.Name | ltrimstr("/"))
+          ]
+        | @tsv
+    '
+}
+
+# --------------------------------------------------------------------------
+# Route file generation
+# --------------------------------------------------------------------------
+
+# emit_site <app> <title> <scheme> <uphost> <upport> <pubport> <mode>
+# Host and port modes both produce a top-level site block (*.site.caddy).
+emit_site() {
+    local app="$1" title="$2" scheme="$3" uphost="$4" upport="$5" pubport="$6" mode="$7"
+    local address
+    if [[ "$mode" == "port" ]]; then
+        address=":${pubport}"
+    else
+        address="http://${app}.local, http://${app}.${BASE_HOST}.local"
+    fi
+
+    cat <<ROUTE
+# Generated by homeos-proxy-sync - do not edit.
+# app=${app} mode=${mode} upstream=${scheme}://${uphost}:${upport}
+${address} {
+	import homeos_headers
+	import homeos_lan_only
+	reverse_proxy ${scheme}://${uphost}:${upport} {
+		import homeos_upstream
+	}
+}
+ROUTE
+}
+
+# emit_path <app> <title> <scheme> <uphost> <upport> <strip>
+# Path mode contributes a handle block imported *inside* the dashboard site.
+emit_path() {
+    local app="$1" title="$2" scheme="$3" uphost="$4" upport="$5" strip="$6"
+
+    printf '# Generated by homeos-proxy-sync - do not edit.\n'
+    printf '# app=%s mode=path upstream=%s://%s:%s\n' "$app" "$scheme" "$uphost" "$upport"
+    printf '\thandle /app/%s/* {\n' "$app"
+    # Most apps need the prefix removed; prefix-aware ones (Grafana with
+    # root_url, Home Assistant behind a base path) set strip_prefix=false.
+    if [[ "$strip" == "true" ]]; then
+        printf '\t\turi strip_prefix /app/%s\n' "$app"
+    fi
+    printf '\t\treverse_proxy %s://%s:%s {\n' "$scheme" "$uphost" "$upport"
+    printf '\t\t\timport homeos_upstream\n'
+    printf '\t\t}\n'
+    printf '\t}\n'
+    printf '\tredir /app/%s /app/%s/ permanent\n' "$app" "$app"
+}
+
+# Build the complete desired state into a staging directory.
+generate_into() {
+    local stage="$1" count=0
+    local app title mode scheme uphost upport pubport strip cname
+
+    cp -f "${ROUTES_DIR}/00-placeholder.site.caddy" "$stage/" 2>/dev/null || \
+        printf '# placeholder\n' > "${stage}/00-placeholder.site.caddy"
+    cp -f "${ROUTES_DIR}/00-placeholder.path.caddy" "$stage/" 2>/dev/null || \
+        printf '# placeholder\n' > "${stage}/00-placeholder.path.caddy"
+
+    while IFS=$'\t' read -r app title mode scheme uphost upport pubport strip cname; do
+        [[ -n "$app" ]] || continue
+        app="$(slugify "$app")"
+        [[ -n "$app" ]] || { log::warn "container ${cname}: app name slugifies to nothing"; continue; }
+
+        case "$mode" in
+            host|port)
+                emit_site "$app" "$title" "$scheme" "$uphost" "$upport" "$pubport" "$mode" \
+                    > "${stage}/10-${app}.site.caddy" ;;
+            path)
+                emit_path "$app" "$title" "$scheme" "$uphost" "$upport" "$strip" \
+                    > "${stage}/10-${app}.path.caddy" ;;
+            *)
+                log::warn "container ${cname}: unknown homeos.route='${mode}', skipping"
+                continue ;;
+        esac
+        log::debug "route ${app} (${mode}) -> ${scheme}://${uphost}:${upport}"
+        count=$((count + 1))
+    done < <(discover)
+
+    printf '%s' "$count"
+}
+
+# --------------------------------------------------------------------------
+# Apply
+# --------------------------------------------------------------------------
+
+# Swap the staged route set in, validate, reload. A staged set that fails
+# validation is rolled back so a single malformed label cannot take the whole
+# proxy down.
+apply_routes() {
+    local stage="$1" backup rc=0
+    backup="$(mktemp -d "${STAGE_ROOT}/homeos-routes-bak.XXXXXX")"
+
+    if diff -qr "$stage" "$ROUTES_DIR" >/dev/null 2>&1; then
+        log::debug "routes already current"
+        rm -rf "$stage" "$backup"
+        return 10
+    fi
+
+    cp -a "${ROUTES_DIR}/." "$backup/" 2>/dev/null || true
+    rm -f "${ROUTES_DIR}"/*.caddy
+    cp -a "${stage}/." "${ROUTES_DIR}/"
+    chmod 0644 "${ROUTES_DIR}"/*.caddy 2>/dev/null || true
+
+    if ! caddy validate --config "$CADDYFILE" >/dev/null 2>&1; then
+        log::error "generated routes failed Caddy validation - rolling back"
+        caddy validate --config "$CADDYFILE" 2>&1 | sed 's/^/      /' >&2 || true
+        rm -f "${ROUTES_DIR}"/*.caddy
+        cp -a "${backup}/." "${ROUTES_DIR}/" 2>/dev/null || true
+        rm -rf "$stage" "$backup"
+        return 1
+    fi
+
+    if systemctl is-active --quiet caddy 2>/dev/null; then
+        if ! caddy reload --config "$CADDYFILE" --force >/dev/null 2>&1; then
+            log::error "caddy reload failed - rolling back"
+            rm -f "${ROUTES_DIR}"/*.caddy
+            cp -a "${backup}/." "${ROUTES_DIR}/" 2>/dev/null || true
+            caddy reload --config "$CADDYFILE" --force >/dev/null 2>&1 || true
+            rc=1
+        else
+            log::ok "caddy reloaded"
+        fi
+    else
+        log::info "caddy is not running - routes written, will apply on start"
+    fi
+
+    rm -rf "$stage" "$backup"
+    return "$rc"
+}
+
+# --------------------------------------------------------------------------
+# mDNS aliases for host-mode routes
+# --------------------------------------------------------------------------
+
+# Each alias is a transient systemd unit running avahi-publish, which keeps the
+# record alive only as long as the unit does. That makes teardown exact: stop
+# the unit and the name stops resolving.
+sync_aliases() {
+    local wanted="$1"        # newline-separated app slugs
+    [[ "$PUBLISH_ALIASES" == "true" ]] || return 0
+    have avahi-publish || { log::debug "avahi-publish absent; skipping aliases"; return 0; }
+    have systemd-run   || return 0
+
+    local ip; ip="$(primary_ip)"
+    if [[ -z "$ip" || "$ip" == "127.0.0.1" ]]; then
+        log::warn "no LAN address found - not publishing mDNS aliases"
+        return 0
+    fi
+
+    local app unit
+    while IFS= read -r app; do
+        [[ -n "$app" ]] || continue
+        unit="homeos-mdns-${app}.service"
+        if systemctl is-active --quiet "$unit" 2>/dev/null; then
+            log::debug "alias ${app}.local already published"
+            continue
+        fi
+        if systemd-run --unit="$unit" --collect --quiet \
+             --description="HomeOS mDNS alias for ${app}.local" \
+             /usr/bin/avahi-publish -a -R "${app}.local" "$ip" >/dev/null 2>&1; then
+            log::info "published mDNS alias ${app}.local -> ${ip}"
+        else
+            log::warn "could not publish mDNS alias for ${app}.local"
+        fi
+    done <<< "$wanted"
+
+    # Retire aliases whose app is gone.
+    local active
+    while IFS= read -r active; do
+        [[ -n "$active" ]] || continue
+        app="${active#homeos-mdns-}"; app="${app%.service}"
+        if ! grep -qxF "$app" <<< "$wanted"; then
+            systemctl stop "$active" >/dev/null 2>&1 || true
+            log::info "withdrew mDNS alias ${app}.local"
+        fi
+    done < <(systemctl list-units --state=active --no-legend --plain \
+                 'homeos-mdns-*.service' 2>/dev/null | awk '{print $1}')
+}
+
+# --------------------------------------------------------------------------
+# Commands
+# --------------------------------------------------------------------------
+
+cmd_sync() {
+    local stage count rc=0
+    mkdir -p "$STAGE_ROOT"
+    stage="$(mktemp -d "${STAGE_ROOT}/homeos-routes.XXXXXX")"
+
+    count="$(generate_into "$stage")"
+    log::debug "discovered ${count} published container(s)"
+
+    apply_routes "$stage" || rc=$?
+    if (( rc == 1 )); then
+        return 1
+    fi
+
+    # Host-mode apps are the ones that need a name on the network.
+    local hosts
+    hosts="$(discover | awk -F'\t' '$3 == "host" {print $1}')"
+    sync_aliases "$hosts"
+
+    (( rc == 10 )) && log::debug "no route changes"
+    return 0
+}
+
+# Debounced event loop: Docker emits several events for one `compose up`, and
+# reloading Caddy once per event would thrash the proxy.
+cmd_watch() {
+    local debounce="${HOMEOS_SYNC_DEBOUNCE:-2}"
+    log::info "watching Docker events (debounce ${debounce}s)"
+    cmd_sync || log::warn "initial sync failed"
+
+    # Restarting the reader is deliberate: `docker events` exits when the daemon
+    # restarts, and we want to resync as soon as it comes back.
+    while true; do
+        while read -r _line; do
+            # Drain any events that arrive during the debounce window.
+            while read -r -t "$debounce" _more; do :; done
+            log::debug "docker event burst -> resync"
+            cmd_sync || log::warn "sync failed; keeping previous routes"
+        done < <(docker events \
+                    --filter type=container \
+                    --filter event=start --filter event=die \
+                    --filter event=destroy --filter event=rename \
+                    --format '{{.Actor.Attributes.name}} {{.Status}}' 2>/dev/null)
+
+        log::warn "docker event stream ended - retrying in 5s"
+        sleep 5
+    done
+}
+
+cmd_list() {
+    local app title mode scheme uphost upport pubport strip cname
+    printf '%-18s %-8s %-28s %-24s %s\n' APP MODE URL UPSTREAM CONTAINER
+    while IFS=$'\t' read -r app title mode scheme uphost upport pubport strip cname; do
+        [[ -n "$app" ]] || continue
+        local url
+        case "$mode" in
+            host) url="http://${app}.local/" ;;
+            path) url="http://${BASE_HOST}.local/app/${app}/" ;;
+            port) url="http://${BASE_HOST}.local:${pubport}/" ;;
+            *)    url="-" ;;
+        esac
+        printf '%-18s %-8s %-28s %-24s %s\n' \
+            "$app" "$mode" "$url" "${scheme}://${uphost}:${upport}" "$cname"
+    done < <(discover)
+}
+
+cmd_status() {
+    printf 'caddyfile   : %s\n' "$CADDYFILE"
+    printf 'routes dir  : %s (%s files)\n' "$ROUTES_DIR" \
+        "$(find "$ROUTES_DIR" -name '10-*.caddy' 2>/dev/null | wc -l | tr -d ' ')"
+    printf 'default mode: %s\n' "$DEFAULT_MODE"
+    printf 'edge network: %s\n' "$EDGE_NET"
+    printf 'lan address : %s\n' "$(primary_ip)"
+    printf 'caddy       : %s\n' "$(systemctl is-active caddy 2>/dev/null || echo unknown)"
+    printf 'config valid: %s\n' \
+        "$(caddy validate --config "$CADDYFILE" >/dev/null 2>&1 && echo yes || echo NO)"
+}
+
+usage() {
+    sed -n '3,28p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    cat <<'USAGE'
+
+Usage: homeos-proxy-sync <command>
+
+  sync     regenerate route files once and reload Caddy
+  watch    stay resident and resync on Docker lifecycle events
+  list     show the routes that would be generated right now
+  status   show proxy configuration and health
+USAGE
+}
+
+main() {
+    require docker
+    require jq
+    require caddy
+    case "${1:-sync}" in
+        sync)             cmd_sync ;;
+        watch)            cmd_watch ;;
+        list|ls)          cmd_list ;;
+        status)           cmd_status ;;
+        -h|--help|help)   usage ;;
+        *)                usage >&2; exit 2 ;;
+    esac
+}
+
+main "$@"

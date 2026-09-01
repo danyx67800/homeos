@@ -1,0 +1,86 @@
+#
+# HomeOS privilege delegation.
+#
+# homeos-core runs unprivileged. Every operation that genuinely needs root is
+# listed here explicitly rather than granting the service account blanket sudo.
+#
+# Be honest about the residual risk: MOUNT and MKFS accept operator-supplied
+# arguments, so anyone who can reach the HomeOS API with storage permissions can
+# reach root through them. That is inherent to a NAS manager. The mitigations
+# that matter are authentication on the API and the sandbox in the unit file,
+# not further narrowing of this list.
+#
+# Installed to /etc/sudoers.d/homeos with mode 0440, validated by visudo -cf
+# before it is put in place.
+#
+
+# --- Disk inspection: read-only, safe --------------------------------------
+Cmnd_Alias HOMEOS_INSPECT = \
+    /usr/sbin/smartctl, \
+    /usr/bin/lsblk, \
+    /usr/sbin/blkid, \
+    /usr/sbin/hdparm -C *, \
+    /usr/sbin/hdparm -I *, \
+    /usr/bin/findmnt
+
+# --- Disk power management -------------------------------------------------
+Cmnd_Alias HOMEOS_SPINDOWN = \
+    /usr/sbin/hdparm -S *, \
+    /usr/sbin/hdparm -y *
+
+# --- Partitioning and filesystem creation ----------------------------------
+Cmnd_Alias HOMEOS_FORMAT = \
+    /usr/sbin/parted, \
+    /usr/sbin/sgdisk, \
+    /usr/sbin/partprobe, \
+    /usr/sbin/wipefs, \
+    /usr/sbin/mkfs.ext4, \
+    /usr/sbin/mkfs.btrfs, \
+    /usr/sbin/mkfs.xfs, \
+    /usr/bin/mkfs.ext4, \
+    /usr/bin/mkfs.btrfs, \
+    /usr/bin/mkfs.xfs, \
+    /usr/sbin/e2label, \
+    /usr/sbin/btrfs, \
+    /usr/sbin/tune2fs
+
+# --- Mounting --------------------------------------------------------------
+Cmnd_Alias HOMEOS_MOUNT = \
+    /usr/bin/mount, \
+    /usr/bin/umount, \
+    /usr/bin/systemd-mount, \
+    /usr/bin/systemd-umount
+
+# --- Samba user and share management ---------------------------------------
+Cmnd_Alias HOMEOS_SAMBA = \
+    /usr/bin/smbpasswd, \
+    /usr/bin/pdbedit, \
+    /usr/bin/testparm, \
+    /usr/bin/smbcontrol
+
+# --- Service control, scoped to the units HomeOS owns ----------------------
+Cmnd_Alias HOMEOS_SERVICES = \
+    /usr/bin/systemctl reload smbd, \
+    /usr/bin/systemctl restart smbd, \
+    /usr/bin/systemctl reload caddy, \
+    /usr/bin/systemctl restart caddy, \
+    /usr/bin/systemctl restart avahi-daemon, \
+    /usr/bin/systemctl start  homeos-*, \
+    /usr/bin/systemctl stop   homeos-*, \
+    /usr/bin/systemctl restart homeos-*, \
+    /usr/bin/systemctl daemon-reload
+
+# --- Power control exposed by the dashboard --------------------------------
+Cmnd_Alias HOMEOS_POWER = \
+    /usr/sbin/shutdown, \
+    /usr/sbin/reboot, \
+    /usr/bin/systemctl poweroff, \
+    /usr/bin/systemctl reboot
+
+homeos ALL=(root) NOPASSWD: HOMEOS_INSPECT, HOMEOS_SPINDOWN, HOMEOS_FORMAT, \
+                            HOMEOS_MOUNT, HOMEOS_SAMBA, HOMEOS_SERVICES, \
+                            HOMEOS_POWER
+
+# Never require a TTY: homeos-core has none.
+Defaults:homeos !requiretty
+Defaults:homeos !syslog

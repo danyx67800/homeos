@@ -1,0 +1,13 @@
+{
+  "device":{"name":"/dev/sdb","type":"sat"},
+  "smart_support":{"available":true,"enabled":true},
+  "smart_status":{"passed":true},
+  "temperature":{"current":33},
+  "power_on_time":{"hours":420},
+  "ata_smart_attributes":{"table":[
+    {"id":5,"name":"Reallocated_Sector_Ct","value":200,"worst":200,"thresh":140,
+     "when_failed":"","raw":{"value":0,"string":"0"}},
+    {"id":197,"name":"Current_Pending_Sector","value":200,"worst":200,"thresh":0,
+     "when_failed":"","raw":{"value":0,"string":"0"}}
+  ]}
+}

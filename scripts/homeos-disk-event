@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+#
+# homeos-disk-event <add|remove> <devnode>
+#
+# Invoked from 99-homeos-storage.rules via a transient systemd unit. Keeps the
+# udev worker unblocked by doing the minimum: record the event and poke the API.
+# If homeos-core is down the drop file is still there, so nothing is lost.
+#
+set -euo pipefail
+
+ACTION="${1:-unknown}"
+DEVNODE="${2:-unknown}"
+SPOOL=/var/lib/homeos/storage-events
+API="http://127.0.0.1:8790/api/v1/storage/events"
+TOKEN_FILE=/etc/homeos/secrets/api.token
+
+mkdir -p "$SPOOL"
+STAMP="$(date -u '+%Y%m%dT%H%M%S%N')"
+printf '{"action":"%s","device":"%s","at":"%s"}\n' \
+    "$ACTION" "$DEVNODE" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
+    > "${SPOOL}/${STAMP}-$(basename "$DEVNODE").json"
+
+# Best effort: the backend reconciles from lsblk on its own schedule too.
+if [[ -r "$TOKEN_FILE" ]] && command -v curl >/dev/null 2>&1; then
+    curl -fsS --max-time 3 \
+         -H "Authorization: Bearer $(cat "$TOKEN_FILE")" \
+         -H "Content-Type: application/json" \
+         -d "{\"action\":\"${ACTION}\",\"device\":\"${DEVNODE}\"}" \
+         "$API" >/dev/null 2>&1 || true
+fi
+
+logger -t homeos-disk-event "storage ${ACTION}: ${DEVNODE}"

@@ -1,0 +1,20 @@
+{
+  "device":{"name":"/dev/sda","type":"sat"},
+  "model_name":"Example HDD 4TB",
+  "serial_number":"EXAMPLE0000001",
+  "smart_support":{"available":true,"enabled":true},
+  "smart_status":{"passed":true},
+  "temperature":{"current":41},
+  "power_on_time":{"hours":38104},
+  "power_cycle_count":91,
+  "ata_smart_attributes":{"table":[
+    {"id":5,"name":"Reallocated_Sector_Ct","value":198,"worst":198,"thresh":140,
+     "when_failed":"","raw":{"value":12,"string":"12"}},
+    {"id":9,"name":"Power_On_Hours","value":48,"worst":48,"thresh":0,
+     "when_failed":"","raw":{"value":38104,"string":"38104"}},
+    {"id":197,"name":"Current_Pending_Sector","value":200,"worst":200,"thresh":0,
+     "when_failed":"","raw":{"value":3,"string":"3"}},
+    {"id":199,"name":"UDMA_CRC_Error_Count","value":200,"worst":200,"thresh":0,
+     "when_failed":"","raw":{"value":0,"string":"0"}}
+  ]}
+}

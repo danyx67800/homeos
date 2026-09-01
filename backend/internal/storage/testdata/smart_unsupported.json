@@ -1,0 +1,5 @@
+{
+  "device":{"name":"/dev/sdd","type":"scsi"},
+  "smart_support":{"available":false,"enabled":false},
+  "smartctl_messages":[{"string":"Unknown USB bridge","severity":"error"}]
+}

@@ -1,0 +1,50 @@
+manifestVersion: 1
+id: nextcloud
+name: Nextcloud
+tagline: Your files, calendar and contacts, self-hosted
+description: A private cloud for files, calendars and contacts.
+category: productivity
+version: "29.0.4"
+icon: nextcloud.svg
+architectures: [amd64, arm64]
+
+image: nextcloud:29.0.4-apache
+port: 80
+route: host
+
+env:
+  - key: NEXTCLOUD_ADMIN_USER
+    label: Admin username
+    type: string
+    default: admin
+    required: true
+  - key: NEXTCLOUD_ADMIN_PASSWORD
+    label: Admin password
+    type: password
+    required: true
+    generate: true
+  - key: POSTGRES_PASSWORD
+    label: Database password
+    type: password
+    generate: true
+    advanced: true
+
+volumes:
+  - name: html
+    path: /var/www/html
+  - hostPath: /var/lib/homeos/data
+    path: /data
+
+sidecars:
+  db:
+    image: postgres:16.4-alpine
+    useEnv:
+      - POSTGRES_PASSWORD
+    env:
+      - key: POSTGRES_DB
+        label: Database name
+        type: string
+        default: nextcloud
+    volumes:
+      - name: pgdata
+        path: /var/lib/postgresql/data

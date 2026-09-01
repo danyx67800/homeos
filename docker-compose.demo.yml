@@ -1,0 +1,58 @@
+# HomeOS demo stack: the built dashboard served from disk, as on an appliance.
+#
+#   docker compose -f docker-compose.demo.yml up --build
+#   → http://localhost:8080
+#
+# Use this to check a release the way a user will see it. For day-to-day work
+# use docker-compose.dev.yml, which has hot reload.
+
+name: homeos-demo
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backend
+      args:
+        VERSION: ${HOMEOS_VERSION:-demo}
+    restart: unless-stopped
+    networks: [homeos-edge]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./docker/config.yaml:/etc/homeos/config.yaml:ro
+      - homeos-state:/var/lib/homeos
+      - homeos-etc:/etc/homeos/secrets
+
+  web:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.web
+    volumes:
+      - web-dist:/opt/homeos/web
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      web:
+        condition: service_completed_successfully
+      backend:
+        condition: service_started
+    networks: [homeos-edge]
+    ports:
+      - "8080:80"
+    volumes:
+      - ./docker/Caddyfile.demo:/etc/caddy/Caddyfile:ro
+      - web-dist:/opt/homeos/web:ro
+      - caddy-data:/data
+
+networks:
+  homeos-edge:
+    name: homeos-edge
+    driver: bridge
+
+volumes:
+  homeos-state:
+  homeos-etc:
+  web-dist:
+  caddy-data:

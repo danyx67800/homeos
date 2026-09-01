@@ -1,0 +1,5 @@
+dist/
+.testbin/
+homeos-core
+homeos-core.exe
+*.test.exe

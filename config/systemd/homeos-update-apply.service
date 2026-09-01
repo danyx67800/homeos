@@ -1,0 +1,28 @@
+[Unit]
+Description=HomeOS: apply a staged update
+Documentation=https://github.com/danyx67800/homeos
+# It restarts homeos-core, so it must not be ordered as a dependency of it.
+After=network.target
+ConditionPathExists=/var/lib/homeos/updates/pending
+
+[Service]
+Type=oneshot
+# Runs as root: it rewrites the release symlink under /usr/lib/homeos and
+# restarts the service. homeos-core triggers it with `systemctl start`, which
+# the phase-1 sudoers drop-in already permits, so over-the-air updates need no
+# new privilege. The version to apply travels through the pending file, not
+# argv, because a unit started by name carries no arguments.
+ExecStart=/usr/lib/homeos/bin/homeos-apply-update
+
+# Generous: the health check alone waits 90s, and a slow SD card takes a while
+# to start a 25 MB binary.
+TimeoutStartSec=300
+RemainAfterExit=no
+
+# Deliberately not sandboxed. Rewriting /usr/lib and restarting another unit is
+# exactly what ProtectSystem would block, and this runs for seconds under
+# systemd's eye rather than as a long-lived surface.
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=homeos-update

@@ -1,0 +1,39 @@
+# Demo front door: serves the built dashboard from disk, as an appliance does.
+
+{
+	admin off
+	auto_https off
+	persist_config off
+}
+
+(homeos_upstream) {
+	header_up X-Real-IP {remote_host}
+	header_up X-Forwarded-Host {host}
+	flush_interval -1
+}
+
+:80 {
+	encode zstd gzip
+
+	handle /api/* {
+		reverse_proxy backend:8790 {
+			import homeos_upstream
+		}
+	}
+	handle /ws/* {
+		reverse_proxy backend:8790 {
+			import homeos_upstream
+		}
+	}
+	handle /events* {
+		reverse_proxy backend:8790 {
+			import homeos_upstream
+		}
+	}
+
+	handle {
+		root * /opt/homeos/web
+		try_files {path} /index.html
+		file_server
+	}
+}

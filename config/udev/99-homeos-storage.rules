@@ -1,0 +1,31 @@
+#
+# HomeOS — block device hotplug notification.
+#
+# udev does not do work here; it only tells homeos-core that the disk topology
+# changed. Doing anything heavier inside a udev rule blocks the event queue and
+# can wedge device enumeration at boot, so the rule fires a transient unit and
+# returns immediately.
+#
+# The backend then re-reads lsblk and reconciles, which also covers the events
+# it slept through.
+#
+
+# Whole disks only: partitions generate a second event we do not need, and
+# device-mapper/loop/ram devices are noise.
+SUBSYSTEM!="block", GOTO="homeos_storage_end"
+KERNEL!="sd[a-z]|sd[a-z][a-z]|nvme[0-9]n[0-9]|mmcblk[0-9]|vd[a-z]", GOTO="homeos_storage_end"
+ENV{DEVTYPE}!="disk", GOTO="homeos_storage_end"
+
+# Skip the coldplug storm during boot; homeos-core enumerates on start anyway.
+ACTION!="add", ACTION!="remove", GOTO="homeos_storage_end"
+
+# Mark the device so `udevadm info` shows HomeOS considered it.
+ENV{HOMEOS_STORAGE}="1"
+
+# Fire-and-forget: --no-block keeps the udev worker free.
+RUN+="/usr/bin/systemd-run --no-block --collect --quiet \
+      --unit=homeos-disk-event-$env{ACTION}-$kernel \
+      --description=HomeOS\x20disk\x20event\x20$env{ACTION}\x20$kernel \
+      /usr/lib/homeos/bin/homeos-disk-event $env{ACTION} $devnode"
+
+LABEL="homeos_storage_end"

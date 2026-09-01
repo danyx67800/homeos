@@ -1,0 +1,78 @@
+# HomeOS core configuration.
+# Values here are read at homeos-core start-up; edit and restart the service:
+#   systemctl restart homeos-core
+version: 1
+
+system:
+  hostname: homenas
+  domain: local
+  timezone: Europe/Rome
+
+api:
+  # Bound to loopback on purpose: all external access is terminated by the
+  # reverse proxy, which owns TLS, auth and access logging.
+  listen: 127.0.0.1
+  port: 8790
+  # Blank on a fresh install; the first-run wizard writes the admin account.
+  session_ttl_hours: 168
+
+paths:
+  config: /etc/homeos
+  apps: /var/lib/homeos/apps
+  data: /var/lib/homeos/data
+  store: /var/lib/homeos/store
+  database: /var/lib/homeos/db/homeos.db
+  backups: /var/lib/homeos/backups
+  logs: /var/log/homeos
+  storage_root: /mnt/storage
+  web_root: /opt/homeos/web
+
+docker:
+  socket: /var/run/docker.sock
+  edge_network: homeos-edge
+  app_subnet_pool: 10.21.0.0/16
+  app_subnet_size: 24
+  compose_project_prefix: homeos
+
+proxy:
+  engine: caddy
+  admin_endpoint: http://127.0.0.1:2019
+  routes_dir: /etc/homeos/proxy/routes.d
+  # host   -> http://<app>.local            (mDNS alias published automatically)
+  # path   -> http://homenas.local/app/<app>/
+  # port   -> http://homenas.local:<port>/
+  default_route_mode: host
+  publish_mdns_aliases: true
+
+storage:
+  mount_root: /mnt/storage
+  default_filesystem: ext4
+  smart_poll_interval_minutes: 30
+
+samba:
+  workgroup: WORKGROUP
+  managed_config: /etc/homeos/samba/shares.conf
+  share_group: homeos-share
+
+appstore:
+  # Replace with your own catalogue fork; phase 2 clones and parses it.
+  repository: https://github.com/homeos-apps/appstore.git
+  branch: main
+  refresh_interval_hours: 12
+
+telemetry:
+  sample_interval_seconds: 2
+  history_retention_minutes: 60
+
+update:
+  # Clear channel_url to turn over-the-air updates off entirely.
+  channel_url: https://updates.homeos.dev/stable.json
+  # auto_check downloads and stages; it never restarts the appliance.
+  auto_check: true
+  check_interval_hours: 24
+  # auto_apply restarts the box unattended when an update lands. Off by
+  # default: a NAS mid-transfer is a bad moment to be surprised by a reboot.
+  auto_apply: false
+  releases_dir: /usr/lib/homeos/releases
+  public_key_file: /etc/homeos/update.pub
+  keep_releases: 3

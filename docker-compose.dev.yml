@@ -1,0 +1,93 @@
+# HomeOS development stack.
+#
+#   docker compose -f docker-compose.dev.yml up
+#   → http://localhost:8080
+#
+# The backend runs for real against the host's Docker socket, so container
+# orchestration and the app store work exactly as they do on an appliance.
+# Caddy sits in front with the same routing, so websocket upgrades, SSE
+# buffering and SPA deep links behave the way they will in production.
+#
+# What does not work here, and why:
+#   - storage: formatting and mounting need the host's block devices and root.
+#     The API answers 503, which is the same honest response an LXC install
+#     gets.
+#   - Samba: no smbd in the image; the share API validates and writes its
+#     config file, but nothing serves it.
+#   - mDNS and over-the-air updates: both are systemd-shaped and have no
+#     meaning inside a container.
+
+name: homeos-dev
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backend
+      args:
+        VERSION: dev
+    restart: unless-stopped
+    networks: [homeos-edge]
+    volumes:
+      # Read-write on purpose: this is what lets the app store actually start
+      # containers. It is root-equivalent on the host — run this stack on a
+      # development machine, not on anything you care about.
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./docker/config.yaml:/etc/homeos/config.yaml:ro
+      - homeos-state:/var/lib/homeos
+      - homeos-etc:/etc/homeos/secrets
+    environment:
+      HOMEOS_LOG_LEVEL: debug
+
+  web:
+    image: node:24-alpine
+    working_dir: /src
+    restart: unless-stopped
+    networks: [homeos-edge]
+    volumes:
+      - ./web:/src
+      # Kept out of the bind mount so the container's Linux binaries are not
+      # overwritten by the host's, which is the usual way this breaks on macOS
+      # and Windows.
+      - web-modules:/src/node_modules
+    command: >
+      sh -c "npm install --no-audit --no-fund &&
+             npm run dev -- --host 0.0.0.0"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on: [backend, web]
+    networks: [homeos-edge]
+    ports:
+      - "8080:80"
+    volumes:
+      - ./docker/Caddyfile.dev:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+
+  # A labelled container so the launcher and homeos-proxy-sync have something
+  # real to show without installing anything from the store.
+  sample-app:
+    image: nginxdemos/hello:plain-text
+    restart: unless-stopped
+    networks: [homeos-edge]
+    labels:
+      homeos.managed: "true"
+      homeos.enable: "true"
+      homeos.app: "hello"
+      homeos.title: "Hello"
+      homeos.port: "80"
+      homeos.route: "port"
+      homeos.category: "developer"
+      homeos.version: "1.0"
+
+networks:
+  homeos-edge:
+    name: homeos-edge
+    driver: bridge
+
+volumes:
+  homeos-state:
+  homeos-etc:
+  web-modules:
+  caddy-data:

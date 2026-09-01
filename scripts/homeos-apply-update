@@ -1,0 +1,159 @@
+#!/usr/bin/env bash
+#
+# homeos-apply-update — swap the running release for a staged one, atomically.
+#
+# Run as root by homeos-update-apply.service, which homeos-core triggers with
+# `systemctl start` (already permitted by the phase-1 sudoers drop-in, so OTA
+# needs no new privilege). The version to apply is read from a file rather than
+# an argument, because the service is started by name and carries no argv.
+#
+# The whole design rests on one property: `current` is a symlink, and replacing
+# a symlink by rename(2) is atomic. There is never a moment when the appliance
+# is half-updated. Rolling back is pointing it at the previous release.
+#
+# This runs as a separate process on purpose. The daemon cannot supervise its
+# own replacement, so the health check and the rollback have to live outside it.
+#
+set -euo pipefail
+
+# Overridable so the swap and rollback paths can be exercised against a sandbox
+# tree; production passes none of these.
+HOMEOS_ROOT="${HOMEOS_ROOT:-/usr/lib/homeos}"
+RELEASES="${HOMEOS_ROOT}/releases"
+CURRENT="${HOMEOS_ROOT}/current"
+PREVIOUS="${HOMEOS_ROOT}/previous"
+PENDING="${HOMEOS_PENDING:-/var/lib/homeos/updates/pending}"
+STATE="${HOMEOS_UPDATE_STATE:-/var/lib/homeos/updates/last-result.json}"
+HEALTH_URL="${HOMEOS_HEALTH_URL:-http://127.0.0.1:8790/api/v1/health}"
+HEALTH_TIMEOUT="${HOMEOS_HEALTH_TIMEOUT:-90}"
+
+log() { logger -t homeos-update "$*"; printf '[update] %s\n' "$*"; }
+
+write_result() {
+    local status="$1" version="$2" message="$3"
+    mkdir -p "$(dirname "$STATE")"
+    printf '{"status":"%s","version":"%s","message":"%s","at":"%s"}\n' \
+        "$status" "$version" "${message//\"/\'}" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
+        > "$STATE"
+    chown homeos:homeos "$STATE" 2>/dev/null || true
+}
+
+die() {
+    log "FAILED: $*"
+    write_result failed "${VERSION:-unknown}" "$*"
+    exit 1
+}
+
+# --------------------------------------------------------------------------
+# Read and validate the requested version
+# --------------------------------------------------------------------------
+[[ -r "$PENDING" ]] || die "no pending update file at $PENDING"
+# Only the first line, and only its outer whitespace trimmed. Deleting every
+# space would silently turn "1.1.0 rm -rf /" into "1.1.0rm-rf/" and report a
+# confusing "not staged" instead of refusing a value that never belonged here.
+VERSION="$(head -n 1 "$PENDING" | head -c 64)"
+VERSION="${VERSION#"${VERSION%%[![:space:]]*}"}"
+VERSION="${VERSION%"${VERSION##*[![:space:]]}"}"
+
+# The file is written by the unprivileged daemon and consumed by root, so the
+# value is treated as untrusted: it becomes a path component below.
+[[ "$VERSION" =~ ^[A-Za-z0-9._-]+$ ]] \
+    || die "pending version '${VERSION}' contains unacceptable characters"
+[[ "$VERSION" != *".."* ]] || die "pending version must not contain '..'"
+
+TARGET="${RELEASES}/${VERSION}"
+[[ -d "$TARGET" ]]                 || die "release ${VERSION} is not staged"
+[[ -x "${TARGET}/bin/homeos-core" ]] || die "release ${VERSION} has no executable binary"
+[[ -f "${TARGET}/web/index.html" ]]  || die "release ${VERSION} has no dashboard"
+
+OLD_TARGET="$(readlink -f "$CURRENT" 2>/dev/null || true)"
+OLD_VERSION="$(basename "${OLD_TARGET:-none}")"
+
+if [[ "$OLD_TARGET" == "$(readlink -f "$TARGET")" ]]; then
+    log "release ${VERSION} is already current"
+    write_result ok "$VERSION" "already current"
+    rm -f "$PENDING"
+    exit 0
+fi
+
+log "applying ${VERSION} (from ${OLD_VERSION})"
+
+# --------------------------------------------------------------------------
+# Swap
+# --------------------------------------------------------------------------
+
+# swap_to <release-dir> — atomically repoint `current`.
+#
+# ln -sfn writes to a temporary name and renames over the target, which is what
+# makes it atomic. Without -n, ln would follow the existing symlink and create
+# the new one *inside* the old release directory.
+swap_to() {
+    local dir="$1"
+    ln -sfn "$dir" "${CURRENT}.new"
+    mv -Tf "${CURRENT}.new" "$CURRENT"
+}
+
+if [[ -n "$OLD_TARGET" ]]; then
+    ln -sfn "$OLD_TARGET" "${PREVIOUS}.new"
+    mv -Tf "${PREVIOUS}.new" "$PREVIOUS"
+fi
+
+swap_to "$TARGET"
+log "symlink now points at ${VERSION}"
+
+# --------------------------------------------------------------------------
+# Restart and verify
+# --------------------------------------------------------------------------
+systemctl daemon-reload >/dev/null 2>&1 || true
+
+if ! systemctl restart homeos-core.service; then
+    log "the new build failed to start; rolling back"
+    ROLLBACK=1
+else
+    # A unit that is "active" has been forked, not necessarily served a
+    # request. The health endpoint answering is the real proof.
+    ROLLBACK=0
+    deadline=$(( SECONDS + HEALTH_TIMEOUT ))
+    healthy=0
+    while (( SECONDS < deadline )); do
+        if curl -fsS --max-time 3 "$HEALTH_URL" >/dev/null 2>&1; then
+            healthy=1
+            break
+        fi
+        # A crash-looping unit will never become healthy; stop waiting for it.
+        if ! systemctl is-active --quiet homeos-core.service; then
+            sleep 2
+            systemctl is-active --quiet homeos-core.service || { healthy=0; break; }
+        fi
+        sleep 2
+    done
+    (( healthy == 1 )) || { log "new build did not become healthy within ${HEALTH_TIMEOUT}s"; ROLLBACK=1; }
+fi
+
+if (( ROLLBACK == 1 )); then
+    if [[ -n "$OLD_TARGET" && -d "$OLD_TARGET" ]]; then
+        swap_to "$OLD_TARGET"
+        systemctl restart homeos-core.service || true
+        log "rolled back to ${OLD_VERSION}"
+        write_result rolled_back "$VERSION" "the new build did not pass its health check; ${OLD_VERSION} was restored"
+    else
+        write_result failed "$VERSION" "the new build failed and there was no previous release to restore"
+    fi
+    rm -f "$PENDING"
+    exit 1
+fi
+
+# --------------------------------------------------------------------------
+# Success
+# --------------------------------------------------------------------------
+NEW_TARGET="$(readlink -f "$CURRENT")"
+REPORTED="$("${NEW_TARGET}/bin/homeos-core" -version 2>/dev/null | awk '{print $2}')"
+log "update complete: now running ${REPORTED:-$VERSION}"
+
+# The proxy routes reference nothing version-specific, but a reload costs
+# nothing and guarantees Caddy is serving the new dashboard assets.
+systemctl reload caddy.service >/dev/null 2>&1 || true
+
+write_result ok "$VERSION" "updated from ${OLD_VERSION}"
+rm -f "$PENDING"
+exit 0

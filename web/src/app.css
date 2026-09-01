@@ -1,0 +1,185 @@
+@import 'tailwindcss';
+
+/* Dark mode is driven by a class on <html>, set before first paint by the
+   inline script in index.html, so the toggle can override the OS preference. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  /* One accent ramp. A dashboard full of competing hues reads as noise; the
+     colour budget is spent on status (green/amber/red) instead. */
+  --color-accent-50:  oklch(0.97 0.02 250);
+  --color-accent-200: oklch(0.88 0.07 250);
+  --color-accent-400: oklch(0.72 0.15 255);
+  --color-accent-500: oklch(0.65 0.18 258);
+  --color-accent-600: oklch(0.57 0.19 260);
+  --color-accent-700: oklch(0.48 0.17 261);
+
+  /* Status colours are the only other hues, and they carry meaning:
+     ok / warn / bad, used identically by gauges, tiles and badges. */
+  --color-ok:   oklch(0.72 0.17 152);
+  --color-warn: oklch(0.79 0.16 78);
+  --color-bad:  oklch(0.64 0.21 25);
+
+  --radius-panel: 1.25rem;
+  --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto,
+               'Helvetica Neue', Arial, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', 'Cascadia Code', Menlo, Consolas, monospace;
+}
+
+@layer base {
+  :root {
+    /* Surfaces are defined once as tokens so the glass treatment below stays
+       consistent and a theme change is a handful of variable swaps. */
+    --surface: 255 255 255;
+    --surface-alpha: 0.58;
+    --ink: 15 23 42;
+    --ink-muted: 71 85 105;
+    --hairline: 15 23 42;
+    --hairline-alpha: 0.08;
+  }
+
+  :root.dark {
+    --surface: 30 41 59;
+    --surface-alpha: 0.55;
+    --ink: 241 245 249;
+    --ink-muted: 148 163 184;
+    --hairline: 255 255 255;
+    --hairline-alpha: 0.1;
+  }
+
+  html { -webkit-tap-highlight-color: transparent; }
+
+  body {
+    margin: 0;
+    min-height: 100dvh;
+    font-family: var(--font-sans);
+    color: rgb(var(--ink));
+    /* Slightly deeper than the panels, so a translucent panel reads as
+       floating above the ground rather than merging into it. */
+    background-color: #dde5f0;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  :root.dark body { background-color: #070b14; }
+
+  /* The dynamic backdrop: two slow-drifting radial washes behind everything.
+     Fixed rather than scrolling so panels appear to move over it. */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: -20%;
+    z-index: -1;
+    background:
+      radial-gradient(45rem 45rem at 15% 10%, oklch(0.62 0.19 258 / 0.5), transparent 62%),
+      radial-gradient(40rem 40rem at 85% 85%, oklch(0.68 0.17 190 / 0.42), transparent 62%),
+      radial-gradient(30rem 30rem at 60% 30%, oklch(0.7 0.15 300 / 0.22), transparent 65%);
+    animation: drift 40s ease-in-out infinite alternate;
+  }
+
+  :root.dark body::before {
+    background:
+      radial-gradient(45rem 45rem at 15% 10%, oklch(0.65 0.18 258 / 0.3), transparent 60%),
+      radial-gradient(40rem 40rem at 85% 85%, oklch(0.7 0.16 190 / 0.24), transparent 60%);
+  }
+
+  @keyframes drift {
+    from { transform: translate3d(-2%, -1%, 0) scale(1); }
+    to   { transform: translate3d(2%, 3%, 0) scale(1.08); }
+  }
+
+  /* A wall-mounted dashboard runs for weeks. Respect the setting that says
+     "stop moving things"; the gradient stays, it just stops drifting. */
+  @media (prefers-reduced-motion: reduce) {
+    body::before { animation: none; }
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+
+  /* Focus is never removed, only restyled: this is the only way to drive the
+     dashboard from a keyboard. */
+  :focus-visible {
+    outline: 2px solid var(--color-accent-400);
+    outline-offset: 2px;
+    border-radius: 0.375rem;
+  }
+
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb {
+    background: rgb(var(--ink-muted) / 0.35);
+    border-radius: 99px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover { background: rgb(var(--ink-muted) / 0.55); background-clip: content-box; }
+  ::-webkit-scrollbar-track { background: transparent; }
+}
+
+@layer components {
+  /* The glass panel. backdrop-filter is expensive on a Raspberry Pi's GPU, so
+     it is defined once here and used on containers only, never on the dozens
+     of small elements inside them. */
+  .glass {
+    background: rgb(var(--surface) / var(--surface-alpha));
+    border: 1px solid rgb(var(--hairline) / var(--hairline-alpha));
+    border-radius: var(--radius-panel);
+    backdrop-filter: blur(16px) saturate(1.4);
+    -webkit-backdrop-filter: blur(16px) saturate(1.4);
+    box-shadow: 0 8px 32px -12px rgb(0 0 0 / 0.25);
+  }
+
+  .glass-hover {
+    transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+  }
+  .glass-hover:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 16px 40px -14px rgb(0 0 0 / 0.35);
+    border-color: rgb(var(--hairline) / 0.2);
+  }
+
+  .muted { color: rgb(var(--ink-muted)); }
+
+  .btn {
+    display: inline-flex; align-items: center; gap: 0.5rem;
+    padding: 0.5rem 0.9rem; border-radius: 0.75rem;
+    font-size: 0.875rem; font-weight: 500;
+    border: 1px solid rgb(var(--hairline) / var(--hairline-alpha));
+    background: rgb(var(--surface) / 0.5);
+    color: rgb(var(--ink));
+    cursor: pointer;
+    transition: background 140ms ease, border-color 140ms ease, opacity 140ms ease;
+  }
+  .btn:hover:not(:disabled) { background: rgb(var(--surface) / 0.85); }
+  .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+  .btn-primary {
+    background: var(--color-accent-500);
+    border-color: transparent;
+    color: white;
+  }
+  .btn-primary:hover:not(:disabled) { background: var(--color-accent-600); }
+
+  .btn-danger { background: var(--color-bad); border-color: transparent; color: white; }
+  .btn-danger:hover:not(:disabled) { filter: brightness(0.92); }
+
+  .field {
+    width: 100%;
+    padding: 0.55rem 0.75rem;
+    border-radius: 0.75rem;
+    border: 1px solid rgb(var(--hairline) / 0.18);
+    background: rgb(var(--surface) / 0.6);
+    color: rgb(var(--ink));
+    font-size: 0.875rem;
+  }
+  .field::placeholder { color: rgb(var(--ink-muted) / 0.8); }
+
+  .chip {
+    display: inline-flex; align-items: center; gap: 0.35rem;
+    padding: 0.2rem 0.6rem; border-radius: 99px;
+    font-size: 0.75rem; font-weight: 500;
+    border: 1px solid rgb(var(--hairline) / 0.14);
+  }
+
+  .tabular { font-variant-numeric: tabular-nums; }
+}

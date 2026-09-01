@@ -1,0 +1,55 @@
+# Example HomeOS app stack.
+#
+# This is the shape the phase-2 App Store engine generates from a manifest. It
+# is a valid stack on its own, so it doubles as a way to exercise the phase-1
+# reverse proxy before the backend exists:
+#
+#   docker compose -f examples/jellyfin.compose.yml up -d
+#   homeos-proxy-sync list
+#   # -> http://jellyfin.local/
+#
+# The two-network pattern is the isolation model: `homeos-edge` is shared and
+# is how the proxy reaches the app; `internal` is private to this stack, so the
+# database is reachable by Jellyfin and by nothing else on the box.
+
+name: homeos-jellyfin
+
+services:
+  jellyfin:
+    image: jellyfin/jellyfin:10.9.11
+    container_name: homeos-jellyfin
+    restart: unless-stopped
+    networks:
+      - homeos-edge
+      - internal
+    volumes:
+      - /var/lib/homeos/apps/jellyfin/config:/config
+      - /var/lib/homeos/apps/jellyfin/cache:/cache
+      - /mnt/storage/media:/media:ro
+    environment:
+      TZ: ${TZ:-Etc/UTC}
+      JELLYFIN_PublishedServerUrl: http://jellyfin.local
+    labels:
+      # --- HomeOS routing contract -------------------------------------
+      homeos.enable: "true"
+      homeos.app: "jellyfin"
+      homeos.title: "Jellyfin"
+      homeos.port: "8096"
+      homeos.route: "host"
+      homeos.category: "media"
+      homeos.icon: "jellyfin.svg"
+    # No `ports:` mapping on purpose. The container is reachable through the
+    # edge network only, so nothing is exposed on the host except via Caddy.
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8096/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+networks:
+  homeos-edge:
+    external: true
+  internal:
+    driver: bridge
+    internal: true

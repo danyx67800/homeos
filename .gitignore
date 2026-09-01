@@ -1,0 +1,30 @@
+# Build output
+dist/
+/backend/homeos-core
+/backend/homeos-release
+/web/dist/
+
+# Dependencies
+node_modules/
+
+# Test artefacts
+/backend/.testbin/
+/web/shots/
+
+# Local binaries produced while developing on Windows
+*.exe
+*.exe~
+
+# Signing keys must never be committed. The private half of an update key
+# stays on the build host; losing control of it means every appliance in the
+# field trusts whatever the holder signs.
+*.key
+*.pem
+homeos-update.key
+
+# Editor and OS noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp

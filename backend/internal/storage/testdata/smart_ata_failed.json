@@ -1,0 +1,10 @@
+{
+  "device":{"name":"/dev/sdc","type":"sat"},
+  "smart_support":{"available":true,"enabled":true},
+  "smart_status":{"passed":false},
+  "temperature":{"current":52},
+  "ata_smart_attributes":{"table":[
+    {"id":5,"name":"Reallocated_Sector_Ct","value":1,"worst":1,"thresh":140,
+     "when_failed":"FAILING_NOW","raw":{"value":2048,"string":"2048"}}
+  ]}
+}

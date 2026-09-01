@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+#
+# homeos-update-check — ask the running daemon to check for an update.
+#
+# Run by homeos-update-check.timer. Deliberately a nudge rather than a second
+# updater: homeos-core owns the channel state, the download and the staging
+# directory, and two processes racing on the same release directory is the
+# failure this avoids.
+#
+set -euo pipefail
+
+API="${HOMEOS_API:-http://127.0.0.1:8790}"
+TOKEN_FILE="${HOMEOS_TOKEN_FILE:-/etc/homeos/secrets/api.token}"
+
+log() { logger -t homeos-update "$*"; printf '%s\n' "$*"; }
+
+command -v curl >/dev/null || { log "curl is not installed; cannot check"; exit 0; }
+
+# Nothing to nudge if the daemon is not up. Exit 0 so a stopped service does not
+# fill the journal with timer failures.
+if ! curl -fsS --max-time 5 "${API}/api/v1/health" >/dev/null 2>&1; then
+    log "homeos-core is not responding; skipping this check"
+    exit 0
+fi
+
+auth=()
+if [[ -r "$TOKEN_FILE" ]]; then
+    auth=(-H "Authorization: Bearer $(cat "$TOKEN_FILE")")
+else
+    log "no API token readable at ${TOKEN_FILE}; skipping"
+    exit 0
+fi
+
+response="$(curl -fsS --max-time 300 -X POST "${auth[@]}" \
+             "${API}/api/v1/system/update/check" 2>&1)" || {
+    log "update check failed: ${response}"
+    exit 0
+}
+
+if grep -q '"up_to_date":true' <<<"$response"; then
+    log "already up to date"
+    exit 0
+fi
+
+version="$(sed -n 's/.*"version":"\([^"]*\)".*/\1/p' <<<"$response" | head -n1)"
+log "update available: ${version:-unknown}"
+
+# Staged, never applied. Applying restarts the appliance, and that stays a
+# decision a person makes — unless update.auto_apply is set in config.yaml, in
+# which case the daemon's own loop handles it.
+curl -fsS --max-time 60 -X POST "${auth[@]}" \
+     "${API}/api/v1/system/update/download" >/dev/null 2>&1 \
+    && log "downloading ${version} in the background" \
+    || log "could not start the download"
+exit 0

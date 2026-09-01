@@ -1,0 +1,25 @@
+[Unit]
+Description=HomeOS: check for updates
+Documentation=https://github.com/danyx67800/homeos
+After=network-online.target homeos-core.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=homeos
+Group=homeos
+# A nudge to the running daemon rather than a second updater: homeos-core owns
+# the channel state, the download and the staging directory. Two processes
+# racing on the same release directory is exactly the failure this avoids.
+ExecStart=/usr/lib/homeos/bin/homeos-update-check
+TimeoutStartSec=1800
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/homeos
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=homeos-update

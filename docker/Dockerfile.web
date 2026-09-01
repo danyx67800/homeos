@@ -1,0 +1,16 @@
+# HomeOS dashboard, built and served as static files.
+#
+# Used by the demo stack. Development uses the Vite dev server instead, so the
+# hot-reload loop is not behind an image rebuild.
+
+FROM node:24-alpine AS build
+WORKDIR /src
+COPY web/package.json web/package-lock.json ./
+RUN npm ci --omit=optional
+COPY web/ ./
+RUN npm run build
+
+FROM alpine:3.21
+COPY --from=build /src/dist /opt/homeos/web
+# No server here: Caddy mounts this and serves it, exactly as on an appliance.
+CMD ["true"]

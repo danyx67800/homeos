@@ -1,0 +1,36 @@
+[Unit]
+Description=HomeOS reverse proxy route synchroniser
+Documentation=man:homeos-proxy-sync(8)
+After=docker.service caddy.service avahi-daemon.service
+Requires=docker.service
+PartOf=caddy.service
+
+[Service]
+Type=simple
+# Runs as root: it writes /etc/homeos/proxy/routes.d and registers per-app mDNS
+# aliases as transient systemd units. The script is small and does not accept
+# input from anywhere except Docker labels.
+ExecStart=/usr/lib/homeos/bin/homeos-proxy-sync watch
+ExecStop=/usr/lib/homeos/bin/homeos-proxy-sync sync
+
+Restart=always
+RestartSec=5
+TimeoutStopSec=15
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/etc/homeos/proxy /var/lib/homeos/tmp /var/log/homeos
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictRealtime=true
+LockPersonality=true
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=homeos-proxy
+
+[Install]
+WantedBy=multi-user.target

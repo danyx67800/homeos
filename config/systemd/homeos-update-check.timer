@@ -1,0 +1,18 @@
+[Unit]
+Description=HomeOS: periodic update check
+Documentation=https://github.com/homeos/homeos
+
+[Timer]
+# Daily, offset by a random hour so a release does not have every appliance in
+# the world fetch the channel in the same minute.
+OnCalendar=daily
+RandomizedDelaySec=3h
+# A box that was powered off at the scheduled time still checks when it comes
+# back, rather than waiting a full day.
+Persistent=true
+# Not at boot: the daemon's own loop covers the first check, and a timer firing
+# during boot competes with everything else for a slow disk.
+OnBootSec=30min
+
+[Install]
+WantedBy=timers.target

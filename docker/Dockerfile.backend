@@ -1,0 +1,50 @@
+# HomeOS backend.
+#
+# Multi-stage: the toolchain never reaches the runtime image, which keeps it
+# small enough to rebuild on every change without the layer cache mattering.
+
+FROM golang:1.25-alpine AS build
+WORKDIR /src
+
+# Dependencies first, so editing source does not re-download the module cache.
+COPY backend/go.mod backend/go.sum ./
+RUN go mod download
+
+COPY backend/ ./
+ARG VERSION=dev
+ARG UPDATE_PUBLIC_KEY=
+RUN CGO_ENABLED=0 go build -trimpath \
+      -ldflags "-s -w -X main.Version=${VERSION} -X main.UpdatePublicKey=${UPDATE_PUBLIC_KEY}" \
+      -o /out/homeos-core ./cmd/homeos-core
+
+# ---------------------------------------------------------------------------
+FROM alpine:3.21
+
+# The daemon shells out to these. smartmontools and util-linux only do anything
+# useful when the container is privileged and has the host's devices; without
+# that the storage API reports 503, which is the honest answer.
+RUN apk add --no-cache \
+      ca-certificates curl git tzdata \
+      docker-cli docker-cli-compose \
+      util-linux smartmontools \
+    && addgroup -S homeos && adduser -S -G homeos -H -s /sbin/nologin homeos
+
+COPY --from=build /out/homeos-core /usr/lib/homeos/bin/homeos-core
+COPY scripts/homeos-proxy-sync scripts/homeos-disk-event /usr/lib/homeos/bin/
+COPY scripts/lib/ /usr/lib/homeos/scripts/
+RUN chmod 0755 /usr/lib/homeos/bin/*
+
+RUN mkdir -p /etc/homeos/secrets /etc/homeos/samba /var/lib/homeos/{apps,data,store,db,updates,tmp} \
+             /var/log/homeos /mnt/storage /opt/homeos/web \
+    && chown -R homeos:homeos /var/lib/homeos /var/log/homeos /etc/homeos/secrets
+
+EXPOSE 8790
+HEALTHCHECK --interval=15s --timeout=3s --start-period=20s --retries=3 \
+  CMD curl -fsS http://127.0.0.1:8790/api/v1/health || exit 1
+
+# Root in the container so the Docker socket is reachable regardless of the
+# host's docker group id, which differs between distributions. On a real
+# appliance the daemon runs as the unprivileged homeos user.
+USER root
+ENTRYPOINT ["/usr/lib/homeos/bin/homeos-core"]
+CMD ["-config", "/etc/homeos/config.yaml"]

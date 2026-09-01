@@ -1,0 +1,18 @@
+[Unit]
+Description=HomeOS first-boot initialisation
+Documentation=https://github.com/danyx67800/homeos
+After=network-online.target docker.service
+Wants=network-online.target
+# Self-disabling: the stamp is written by the script on success.
+ConditionPathExists=!/var/lib/homeos/.firstboot-done
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/lib/homeos/bin/homeos-firstboot
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=homeos-firstboot
+
+[Install]
+WantedBy=multi-user.target

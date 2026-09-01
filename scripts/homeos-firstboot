@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+#
+# homeos-firstboot — one-shot initialisation on the first boot of an appliance
+# image. A bare-metal install.sh run does this work inline, so on that path the
+# unit finds its stamp already written and never runs.
+#
+# Everything here is safe to skip; a failure must not stop the box from booting.
+#
+set -uo pipefail
+
+STAMP=/var/lib/homeos/.firstboot-done
+log() { logger -t homeos-firstboot "$*"; printf '[firstboot] %s\n' "$*"; }
+
+[[ -e "$STAMP" ]] && { log "already initialised"; exit 0; }
+
+# --- Unique host identity --------------------------------------------------
+# An image cloned to many devices would otherwise share a machine-id, which
+# collides on DHCP leases and systemd journal namespacing.
+if [[ ! -s /etc/machine-id ]]; then
+    systemd-machine-id-setup >/dev/null 2>&1 && log "generated machine-id"
+fi
+
+# Shipping SSH host keys inside an image means every unit answers with the same
+# fingerprint, so they are regenerated once, here.
+if [[ -d /etc/ssh ]] && ! ls /etc/ssh/ssh_host_*_key >/dev/null 2>&1; then
+    ssh-keygen -A >/dev/null 2>&1 && log "regenerated SSH host keys"
+    systemctl try-restart ssh sshd >/dev/null 2>&1 || true
+fi
+
+# --- Grow the root filesystem to fill the medium ---------------------------
+if command -v growpart >/dev/null 2>&1; then
+    root_src="$(findmnt -no SOURCE / 2>/dev/null)"
+    if [[ "$root_src" =~ ^(/dev/[a-z0-9]+?)p?([0-9]+)$ ]]; then
+        disk="${BASH_REMATCH[1]}"; part="${BASH_REMATCH[2]}"
+        if growpart "$disk" "$part" >/dev/null 2>&1; then
+            log "grew ${disk}${part}"
+            case "$(findmnt -no FSTYPE / 2>/dev/null)" in
+                ext2|ext3|ext4) resize2fs "$root_src"      >/dev/null 2>&1 && log "resized ext filesystem" ;;
+                btrfs)          btrfs filesystem resize max / >/dev/null 2>&1 && log "resized btrfs" ;;
+                xfs)            xfs_growfs /               >/dev/null 2>&1 && log "resized xfs" ;;
+            esac
+        fi
+    fi
+fi
+
+# --- Timezone from the network, if the operator never set one --------------
+if [[ "$(timedatectl show -p Timezone --value 2>/dev/null)" == "UTC" ]] \
+   && command -v curl >/dev/null 2>&1; then
+    tz="$(curl -fsS --max-time 5 https://ipapi.co/timezone 2>/dev/null || true)"
+    if [[ "$tz" =~ ^[A-Za-z]+/[A-Za-z_+-]+$ ]]; then
+        timedatectl set-timezone "$tz" >/dev/null 2>&1 && log "timezone set to $tz"
+    fi
+fi
+
+# --- Reconcile the proxy against whatever containers already exist ---------
+if [[ -x /usr/lib/homeos/bin/homeos-proxy-sync ]]; then
+    /usr/lib/homeos/bin/homeos-proxy-sync sync >/dev/null 2>&1 \
+        && log "proxy routes synchronised"
+fi
+
+mkdir -p "$(dirname "$STAMP")"
+date -u '+%Y-%m-%dT%H:%M:%SZ' > "$STAMP"
+log "first boot complete"
+exit 0

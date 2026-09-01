@@ -1,0 +1,64 @@
+[Unit]
+Description=HomeOS core engine (REST API, orchestrator, storage manager)
+Documentation=https://github.com/danyx67800/homeos
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+# Phase 1 installs the layout; the binary arrives with phase 2. Without this
+# condition the unit would crash-loop on a fresh phase-1-only system.
+ConditionPathExists=/usr/lib/homeos/bin/homeos-core
+
+[Service]
+Type=notify
+NotifyAccess=main
+User=homeos
+Group=homeos
+# Docker API access, plus the NAS share group for data under /var/lib/homeos/data.
+SupplementaryGroups=docker homeos-share
+
+EnvironmentFile=/etc/homeos/homeos.env
+WorkingDirectory=/var/lib/homeos
+ExecStart=/usr/lib/homeos/bin/homeos-core serve --config /etc/homeos/config.yaml
+ExecReload=/bin/kill -HUP $MAINPID
+
+Restart=on-failure
+RestartSec=3
+# Give up after repeated fast failures instead of hammering Docker forever.
+StartLimitBurst=5
+StartLimitIntervalSec=120
+TimeoutStopSec=30
+WatchdogSec=60
+
+# --- Sandbox -------------------------------------------------------------
+# NoNewPrivileges must stay off: privileged storage and Samba operations are
+# delegated through the sudoers drop-in in /etc/sudoers.d/homeos.
+NoNewPrivileges=false
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/etc/homeos /etc/samba /var/lib/homeos /var/log/homeos /mnt/storage /etc/fstab
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectHostname=false
+RestrictNamespaces=false
+RestrictRealtime=true
+RestrictSUIDSGID=false
+LockPersonality=true
+# smartctl needs the raw block devices, so device isolation stays off.
+PrivateDevices=false
+DeviceAllow=block-* rw
+DeviceAllow=char-* rw
+# Disk mounts performed by the storage manager must be visible to the rest of
+# the system, so the unit's mount namespace propagates outward.
+MountFlags=shared
+
+LimitNOFILE=65536
+OOMPolicy=continue
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=homeos-core
+
+[Install]
+WantedBy=multi-user.target

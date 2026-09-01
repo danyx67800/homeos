@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "moduleResolution": "bundler",
+    "target": "ES2022",
+    "module": "ES2022",
+    "checkJs": true,
+    "allowJs": true,
+    "strict": true,
+    "baseUrl": ".",
+    "paths": { "$lib/*": ["src/lib/*"] }
+  },
+  "include": ["src/**/*.js", "src/**/*.svelte"]
+}

@@ -1,0 +1,21 @@
+{
+  "name": "homeos-dashboard",
+  "private": true,
+  "version": "1.0.0-phase3",
+  "type": "module",
+  "description": "HomeOS web dashboard",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "e2e": "node e2e.mjs"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^5.0.3",
+    "@tailwindcss/vite": "^4.0.0",
+    "playwright": "^1.62.1",
+    "svelte": "^5.19.0",
+    "tailwindcss": "^4.0.0",
+    "vite": "^6.0.7"
+  }
+}
