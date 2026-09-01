@@ -77,7 +77,8 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq --no-install-recommends \
             debootstrap squashfs-tools xorriso grub-common \
-            mtools dosfstools gdisk parted rsync xz-utils file
+            mtools dosfstools gdisk parted rsync xz-utils file \
+            qemu-utils
           # grub-mkrescue needs the GRUB modules for the target it produces, and
           # those ship as per-architecture packages: installing the arm64 set on
           # an amd64 runner fails. The chroot installs its own GRUB separately,
@@ -88,6 +89,12 @@ jobs:
           else
             sudo apt-get install -y -qq --no-install-recommends \
               grub-efi-arm64-bin
+          fi
+          # The boot test needs an emulator and UEFI firmware for the target.
+          if [ "${{ matrix.arch }}" = "amd64" ]; then
+            sudo apt-get install -y -qq --no-install-recommends qemu-system-x86 ovmf
+          else
+            sudo apt-get install -y -qq --no-install-recommends qemu-system-arm qemu-efi-aarch64
           fi
 
       - name: Build the backend and the dashboard
