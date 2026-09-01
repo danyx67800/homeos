@@ -117,11 +117,15 @@ KERNEL_PKGS="linux-image-${ARCH} firmware-linux-free"
 [[ "$ARCH" == "amd64" ]] && KERNEL_PKGS="linux-image-amd64 firmware-linux-free"
 [[ "$ARCH" == "arm64" ]] && KERNEL_PKGS="linux-image-arm64 firmware-linux-free"
 
+# systemd-resolved is a separate package in Debian 12; minbase does not pull it
+# in, and enabling a unit that does not exist is what broke networking here.
+# No ifupdown or isc-dhcp-client: networkd is the one being configured, and two
+# DHCP clients competing over the same interface is worse than either alone.
 in_chroot "apt-get install -y -qq --no-install-recommends \
     ${KERNEL_PKGS} \
     initramfs-tools \
     cloud-guest-utils \
-    ifupdown isc-dhcp-client \
+    systemd-resolved \
     systemd-timesyncd \
     haveged" || die "installing the base system failed"
 
@@ -145,7 +149,22 @@ Name=en* eth*
 [Network]
 DHCP=yes
 NET
-in_chroot "systemctl enable systemd-networkd systemd-resolved ssh >/dev/null 2>&1" || true
+# One unit per command, and no swallowed errors. Enabling all three at once and
+# hiding the output meant that when systemd-resolved turned out to be a separate
+# package in Debian 12, systemctl failed on it and enabled *none* of them — so
+# the image shipped with no network stack and no sign that anything was wrong.
+for unit in systemd-networkd.service systemd-resolved.service ssh.service; do
+    if in_chroot "systemctl enable ${unit}" >/dev/null 2>&1; then
+        printf '  enabled %s\n' "$unit"
+    else
+        printf '  \033[33mcould not enable %s\033[0m\n' "$unit"
+    fi
+done
+
+# An appliance with no network is useless and undiagnosable — the dashboard is
+# the only interface it has. Refuse to build one rather than ship it.
+in_chroot "systemctl is-enabled systemd-networkd.service" >/dev/null 2>&1 \
+    || die "systemd-networkd is not enabled in the image; it would boot with no network"
 
 # --------------------------------------------------------------------------
 # HomeOS
