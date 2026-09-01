@@ -1,4 +1,6 @@
-node_modules/
-dist/
-.vite/
-shots/
+# Anchored, so a directory that happens to share one of these names elsewhere
+# in the tree is not excluded by accident.
+/node_modules/
+/dist/
+/.vite/
+/shots/
