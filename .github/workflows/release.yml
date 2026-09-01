@@ -1,0 +1,116 @@
+name: Cut a release
+
+# Produces the over-the-air update artefacts: signed tarballs and the channel
+# manifest appliances poll. Images are built separately by image.yml, which is
+# far slower; both attach to the same tag.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release, e.g. 1.0.0'
+        required: true
+      notes:
+        description: 'Release notes'
+        required: false
+        default: ''
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Work out the version
+        id: v
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then V="${GITHUB_REF_NAME#v}"; else V="${{ inputs.version }}"; fi
+          case "$V" in
+            [0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "::error::version '$V' is not MAJOR.MINOR.PATCH"; exit 1 ;;
+          esac
+          echo "version=${V}" >> "$GITHUB_OUTPUT"
+
+      - name: Check the signing key is configured
+        env:
+          KEY: ${{ secrets.HOMEOS_SIGNING_KEY }}
+          PUB: ${{ secrets.HOMEOS_PUBLIC_KEY }}
+        run: |
+          # Failing here is the point. An unsigned release is one no appliance
+          # will install, so producing it would only waste everyone's time —
+          # and silently shipping one that skips verification would be worse.
+          [ -n "$KEY" ] || { echo "::error::HOMEOS_SIGNING_KEY is not set. Generate a key with 'homeos-release keygen' and add it to the repository secrets."; exit 1; }
+          [ -n "$PUB" ] || { echo "::error::HOMEOS_PUBLIC_KEY is not set."; exit 1; }
+          echo "signing key present"
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Write the signing key to a file the build can read
+        env:
+          KEY: ${{ secrets.HOMEOS_SIGNING_KEY }}
+          PUB: ${{ secrets.HOMEOS_PUBLIC_KEY }}
+        run: |
+          # Written with a restrictive umask and deleted in a later step. It
+          # never reaches a command line, so it cannot end up in a process
+          # listing or a log.
+          mkdir -p "${{ runner.temp }}/keys"
+          chmod 700 "${{ runner.temp }}/keys"
+          umask 077
+          printf '%s' "$KEY" > "${{ runner.temp }}/keys/homeos-update.key"
+          printf '%s' "$PUB" > "${{ runner.temp }}/keys/homeos-update.pub"
+
+      - name: Build and sign
+        env:
+          HOMEOS_SIGNING_KEY: ${{ runner.temp }}/keys/homeos-update.key
+        run: |
+          set -euo pipefail
+          # latest/download is a stable URL GitHub resolves to the newest
+          # published release, so the manifest never has to name a version.
+          scripts/build-release.sh "${{ steps.v.outputs.version }}" \
+            "https://github.com/${{ github.repository }}/releases/latest/download"
+
+      - name: Shred the key
+        if: always()
+        run: rm -rf "${{ runner.temp }}/keys"
+
+      - name: Show what was produced
+        run: |
+          ls -lh dist/*.tar.gz dist/stable.json
+          echo "::group::stable.json"
+          cat dist/stable.json
+          echo "::endgroup::"
+
+      - name: Attach to a draft release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.v.outputs.version }}
+          name: HomeOS ${{ steps.v.outputs.version }}
+          # A draft on purpose: publishing is what makes every appliance in the
+          # field see this update, and that should be a decision, not a
+          # side effect of pushing a tag.
+          draft: true
+          body: |
+            ${{ inputs.notes }}
+
+            Appliances offer this update once the release is **published** —
+            `releases/latest/download` only resolves to published releases.
+
+            Disk images and the installer ISO are built separately; run the
+            **Build appliance images** workflow for the same version.
+          files: |
+            dist/homeos-*.tar.gz
+            dist/stable.json

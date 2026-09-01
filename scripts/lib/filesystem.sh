@@ -169,7 +169,7 @@ telemetry:
 
 update:
   # Clear channel_url to turn over-the-air updates off entirely.
-  channel_url: https://updates.homeos.dev/stable.json
+  channel_url: https://github.com/danyx67800/homeos/releases/latest/download/stable.json
   # auto_check downloads and stages; it never restarts the appliance.
   auto_check: true
   check_interval_hours: 24

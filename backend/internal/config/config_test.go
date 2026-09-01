@@ -46,7 +46,8 @@ func TestLoadInstallerConfig(t *testing.T) {
 		{"samba.share_group", c.Samba.ShareGroup, "homeos-share"},
 		{"appstore.branch", c.AppStore.Branch, "main"},
 		{"telemetry.sample_interval", c.Telemetry.SampleIntervalSeconds, 2},
-		{"update.channel_url", c.Update.ChannelURL, "https://updates.homeos.dev/stable.json"},
+		{"update.channel_url", c.Update.ChannelURL,
+			"https://github.com/danyx67800/homeos/releases/latest/download/stable.json"},
 		{"update.auto_check", c.Update.AutoCheck, true},
 		// Unattended reboots stay opt-in.
 		{"update.auto_apply", c.Update.AutoApply, false},
