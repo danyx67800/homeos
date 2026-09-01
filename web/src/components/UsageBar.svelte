@@ -16,7 +16,7 @@
     </span>
   </div>
 
-  <div class="h-2 overflow-hidden rounded-full bg-[rgb(var(--ink-muted)/0.16)]">
+  <div class="h-2 overflow-hidden rounded-full bg-[rgb(var(--ink-2)/0.16)]">
     <div class="h-full rounded-full transition-[width] duration-500 ease-out"
          style="width:{Math.min(100, pct)}%; background:{SEVERITY_STROKE[sev]}"></div>
   </div>

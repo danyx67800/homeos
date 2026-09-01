@@ -106,13 +106,13 @@
 </section>
 
 {#if error}
-  <div class="glass flex items-center gap-3 p-5 text-sm text-[var(--color-bad)]">
+  <div class="panel flex items-center gap-3 p-5 text-sm text-[var(--color-bad)]">
     <Icon name="warn" size={18} /><span>{error}</span>
   </div>
 {:else if loading}
-  <div class="glass h-28 animate-pulse opacity-50"></div>
+  <div class="panel h-28 animate-pulse opacity-50"></div>
 {:else if !shares.length}
-  <div class="glass flex flex-col items-center gap-3 p-10 text-center">
+  <div class="panel flex flex-col items-center gap-3 p-10 text-center">
     <Icon name="share" size={26} class="muted" />
     <p class="text-sm font-medium">No shares yet</p>
     <p class="muted max-w-sm text-sm">
@@ -124,7 +124,7 @@
 {:else}
   <div class="flex flex-col gap-3">
     {#each shares as s, i (s.name)}
-      <article class="glass flex flex-wrap items-center gap-4 p-4">
+      <article class="panel flex flex-wrap items-center gap-4 p-4">
         <div class="min-w-0 flex-1">
           <div class="flex flex-wrap items-center gap-2">
             <h3 class="font-medium">{s.name}</h3>
@@ -185,7 +185,7 @@
                placeholder="Films and series" />
       </label>
 
-      <div class="flex flex-col gap-2 rounded-xl bg-[rgb(var(--ink-muted)/0.08)] p-3">
+      <div class="flex flex-col gap-2 rounded-xl bg-[rgb(var(--ink-2)/0.08)] p-3">
         <label class="flex items-center gap-2.5 text-sm">
           <input type="checkbox" bind:checked={editing.public} />
           <span>Allow anyone on the network (no password)</span>

@@ -46,18 +46,18 @@
 
   <div
     bind:this={menu}
-    class="glass fixed z-50 w-52 overflow-hidden p-1 text-sm"
+    class="panel fixed z-50 w-52 overflow-hidden p-1 text-sm"
     style="left:{pos.x}px; top:{pos.y}px"
     role="menu"
   >
     {#each items as item (item.id)}
       {#if item.divider}
-        <div class="my-1 h-px bg-[rgb(var(--hairline)/0.12)]"></div>
+        <div class="my-1 h-px bg-[rgb(var(--line)/0.12)]"></div>
       {:else}
         <button
           role="menuitem"
           class="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left
-                 transition-colors hover:bg-[rgb(var(--surface)/0.9)]
+                 transition-colors hover:bg-[rgb(var(--surface))]
                  disabled:opacity-40 disabled:hover:bg-transparent
                  {item.danger ? 'text-[var(--color-bad)]' : ''}"
           disabled={item.disabled}

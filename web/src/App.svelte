@@ -133,8 +133,7 @@
       {/if}
     </main>
 
-    <nav class="glass fixed inset-x-3 bottom-3 z-30 flex justify-around p-1.5 md:hidden
-                [--surface-alpha:0.94] dark:[--surface-alpha:0.92]">
+    <nav class="panel fixed inset-x-3 bottom-3 z-30 flex justify-around p-1.5 md:hidden">
       {#each TABS as tab (tab.id)}
         <button
           class="flex flex-1 flex-col items-center gap-1 rounded-xl py-2 text-[11px]

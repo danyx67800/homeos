@@ -47,7 +47,7 @@
 </script>
 
 <div class="grid min-h-dvh place-items-center p-4">
-  <div class="glass w-full max-w-sm p-7">
+  <div class="panel w-full max-w-sm p-7">
     <div class="mb-6 flex flex-col items-center gap-3 text-center">
       <div class="grid h-12 w-12 place-items-center rounded-2xl
                   bg-[var(--color-accent-500)] text-white">

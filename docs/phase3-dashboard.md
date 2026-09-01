@@ -55,19 +55,34 @@ acceptable only because the URL terminates on loopback — see
 
 ## 3. Design
 
-Dark-first glassmorphism over a slow-drifting gradient. Decisions worth naming:
+An instrument panel, not a SaaS dashboard. Two rules shape everything:
+
+**Colour means state.** Green, amber and red say something about a disk or a
+container; nothing else in the interface uses them. The chrome is neutral so
+that when something turns amber it is the only thing on screen that has. The
+accent is copper — a drive activity LED — kept well away from the amber that
+means "warning".
+
+**Numbers are the content.** They get tabular figures and the most contrast;
+labels and chrome recede. Tabular figures in the sans face rather than a
+monospace one: in monospace the decimal point takes a full cell of its own and
+"14.4" reads as "14 . 4". Monospace is kept for things that genuinely are text
+in columns — paths, device names, code.
+
+Archivo for the interface, IBM Plex Mono for paths. The glass and the drifting
+gradient are gone: the blur was the most generic thing about the first design
+and the most expensive to paint on a Raspberry Pi, and a panel that animates
+behind numbers you are trying to read is decoration competing with content.
+
+Decisions worth naming:
 
 **The theme resolves before first paint**, in an inline script in `index.html`.
 Doing it in the app would flash white on every load, which on a display someone
 leaves running is genuinely unpleasant.
 
-**`backdrop-filter` only on containers.** It is expensive on a Pi's GPU. The
-`.glass` class is applied to panels, never to the dozens of small elements
-inside them.
-
-**One accent ramp, three status colours.** The colour budget is spent on meaning
-— ok / warn / bad — rather than on decoration. `severity()` lives in one module
-so a number never reads green in a gauge and amber in the card beside it.
+**Flat surfaces with a hairline.** No blur anywhere. `severity()` lives in one
+module so a number never reads green in one widget and amber in the one beside
+it.
 
 **`prefers-reduced-motion` stops the drift.** The gradient stays; it just holds
 still. A wall dashboard that animates for a week is a reasonable thing to want
@@ -92,11 +107,16 @@ Two navigation systems: inline tabs from `md` up, a fixed bottom bar below —
 where the top of a tall phone is out of thumb reach. Both mark the same tab with
 `aria-current`, which the end-to-end test asserts.
 
-The vitals row is `grid-cols-[auto_1fr]`: the gauge panel takes only the width
-it needs, and the stat cards fill whatever is left in an `auto-fit` grid. That
-matters because two of the cards are conditional — temperature and fan speed
-exist on a mini PC and not on most SBCs — and a fixed column count left visible
-holes on the machines that report less.
+**Apps come first.** The launcher is what the page is for; the vitals below it
+are what you check when something feels wrong. The first version had it
+backwards and spent most of a screen on telemetry before you reached anything
+you could click. An end-to-end assertion now fails the build if that order is
+ever reversed.
+
+The vitals are one strip of four or five readings — a label, a figure, a thin
+bar — where two gauges and four cards used to say the same thing in six times
+the height. Temperature only appears where the hardware reports it; a permanent
+"—" is a column of nothing.
 
 Routing is hash-based. Phase 1's Caddyfile already falls back to `index.html`
 so the History API would work, but a hash keeps deep links correct even when

@@ -50,11 +50,34 @@ await page.waitForFunction(
 ).then(() => ok('telemetry stream reports Live'))
  .catch(() => bad('stream never reached Live'));
 
-// Gauges must show a real number, not a placeholder
+// The vitals strip must show real numbers, not placeholders.
 await page.waitForTimeout(2500);
-const gaugeText = await page.textContent('svg[role=img] ~ div, .glass');
-const cpuLabel = await page.getAttribute('svg[role=img]', 'aria-label');
-/CPU: \d+%/.test(cpuLabel ?? '') ? ok(`CPU gauge live (${cpuLabel})`) : bad(`gauge label = "${cpuLabel}"`);
+const vitals = await page.evaluate(() =>
+  [...document.querySelectorAll('.label')].map((l) => {
+    const val = l.parentElement?.querySelector('.readout');
+    return { label: l.textContent.trim(), value: val?.textContent.trim() ?? '' };
+  }).filter((v) => v.value));
+
+const cpu = vitals.find((v) => /CPU/i.test(v.label));
+/^[0-9]+(\.[0-9]+)?%$/.test(cpu?.value ?? '')
+  ? ok(`CPU reading live (${cpu.value})`)
+  : bad(`CPU reading = "${cpu?.value}" from ${JSON.stringify(vitals)}`);
+
+vitals.length >= 4
+  ? ok(`vitals strip shows ${vitals.length} readings`)
+  : bad(`only ${vitals.length} readings in the strip`);
+
+// Apps sit above the vitals. That reordering is the point of the redesign, so
+// it is worth failing a build over if it ever moves back.
+const appsFirst = await page.evaluate(() => {
+  const apps = [...document.querySelectorAll('h2')].find((h) => /^Apps/.test(h.textContent.trim()));
+  const strip = document.querySelector('.label');
+  if (!apps || !strip) return null;
+  return apps.getBoundingClientRect().top < strip.getBoundingClientRect().top;
+});
+appsFirst === true
+  ? ok('the app grid sits above the vitals')
+  : bad('the vitals are above the apps again');
 
 const bodyText = await page.innerText('body');
 /\d+(\.\d+)?\s?(GB|MB)/.test(bodyText) ? ok('memory rendered in real units') : bad('no memory figure');

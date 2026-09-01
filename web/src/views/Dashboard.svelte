@@ -1,7 +1,5 @@
 <script>
-  import Gauge from '../components/Gauge.svelte';
-  import StatCard from '../components/StatCard.svelte';
-  import UsageBar from '../components/UsageBar.svelte';
+  import VitalsBar from '../components/VitalsBar.svelte';
   import AppTile from '../components/AppTile.svelte';
   import ContextMenu from '../components/ContextMenu.svelte';
   import Icon from '../components/Icon.svelte';
@@ -87,111 +85,79 @@
   );
 </script>
 
-<!-- Vitals -->
-<section class="mb-6 grid gap-4 lg:grid-cols-[auto_1fr]">
-  <div class="glass flex flex-wrap items-center justify-center gap-6 px-5 py-6 sm:gap-12 sm:px-8">
-    <Gauge value={m?.cpu?.usage_percent ?? 0} label="CPU"
-           sublabel={m?.cpu?.cores ? `${m.cpu.cores} cores` : ''}
-           severity={severity(m?.cpu?.usage_percent ?? 0)} />
-    <Gauge value={m?.memory?.used_percent ?? 0} label="Memory"
-           sublabel={m ? bytes(m.memory.used_bytes) : ''}
-           severity={severity(m?.memory?.used_percent ?? 0)} />
-    {#if temp}
-      <Gauge value={temp.celsius} label="Temp"
-             display={celsius(temp.celsius)} sublabel={temp.label}
-             severity={tempSeverity(temp.celsius)} />
-    {/if}
-  </div>
 
-  <!-- auto-fit, so the row stays full whether or not this machine reports
-       temperature and fan speed. -->
-  <div class="grid gap-4 grid-cols-[repeat(auto-fit,minmax(13.5rem,1fr))]">
-    <StatCard icon="cpu" label="Processor" value={percent(m?.cpu?.usage_percent ?? 0, 1)}
-            detail={m?.load ? `load ${m.load.load1.toFixed(2)}` : ''}
-            severity={severity(m?.cpu?.usage_percent ?? 0)}
-            history={telemetry.history.cpu} max={100} />
-
-  <StatCard icon="memory" label="Memory"
-            value={m ? `${bytes(m.memory.used_bytes)} / ${bytes(m.memory.total_bytes)}` : '—'}
-            detail={m?.swap?.total_bytes ? `swap ${percent(m.swap.used_percent)}` : ''}
-            severity={severity(m?.memory?.used_percent ?? 0)}
-            history={telemetry.history.mem} max={100} />
-
-  <StatCard icon="network" label="Network"
-            value={bitrate((m?.network ?? []).reduce((a, n) => a + (n.recv_bytes_per_sec ?? 0), 0))}
-            detail="down"
-            history={telemetry.history.net} />
-
-  <StatCard icon="hdd" label="Storage"
-            value={storage.total ? bytes(storage.total - storage.used) : 'No data disks'}
-            detail={storage.total ? `${percent(storage.percent)} used` : 'nothing mounted'}
-            severity={storage.total ? severity(storage.percent) : 'ok'} />
-
-    {#if fans.length}
-      <StatCard icon="restart" label="Cooling" value={`${fans[0].rpm} rpm`}
-                detail={fans.length > 1 ? `${fans.length} fans` : fans[0].label} />
-    {/if}
-  </div>
-</section>
-
-<!-- Filesystems -->
-{#if (m?.filesystems ?? []).length}
-  <section class="glass mb-6 p-5">
-    <h2 class="muted mb-4 flex items-center gap-2 text-xs font-medium uppercase tracking-wide">
-      <Icon name="hdd" size={15} /> Filesystems
-    </h2>
-    <div class="grid gap-4 md:grid-cols-2">
-      {#each m.filesystems as fs (fs.mountpoint)}
-        <UsageBar used={fs.used_bytes} total={fs.total_bytes}
-                  label={fs.mountpoint} sublabel="{fs.device} · {fs.fstype}" />
-      {/each}
-    </div>
-  </section>
-{/if}
-
-<!-- Launcher -->
-<section>
-  <div class="mb-4 flex items-center justify-between">
+<!-- Apps first. The launcher is what this page is for; the vitals below are
+     what you check when something feels wrong. The old order had it backwards
+     and cost most of a screen before you reached anything you could click. -->
+<section class="mb-5">
+  <div class="mb-3 flex items-center justify-between gap-3">
     <h2 class="flex items-center gap-2 text-sm font-semibold">
-      <Icon name="grid" size={16} /> Apps
-      {#if apps.list.length}<span class="muted font-normal">({apps.list.length})</span>{/if}
+      Apps
+      {#if apps.list.length}
+        <span class="faint readout font-normal">{apps.list.length}</span>
+      {/if}
     </h2>
     <button class="btn" onclick={() => onnavigate('store')}>
-      <Icon name="store" size={15} /> App Store
+      <Icon name="store" size={14} /> Store
     </button>
   </div>
 
   {#if apps.error}
-    <div class="glass flex items-center gap-3 p-5 text-sm text-[var(--color-bad)]">
-      <Icon name="warn" size={18} />
+    <div class="note bad">
+      <Icon name="warn" size={15} class="mt-0.5 text-[var(--color-bad)]" />
       <span>{apps.error}</span>
     </div>
   {:else if apps.loading && !apps.list.length}
-    <div class="grid gap-4 grid-cols-[repeat(auto-fill,minmax(9rem,1fr))]">
-      {#each Array(6) as _, i (i)}
-        <div class="glass h-40 animate-pulse opacity-50"></div>
+    <div class="grid gap-2.5 grid-cols-[repeat(auto-fill,minmax(8rem,1fr))]">
+      {#each Array(8) as _, i (i)}
+        <div class="panel h-28 animate-pulse opacity-40"></div>
       {/each}
     </div>
   {:else if !apps.list.length}
-    <div class="glass flex flex-col items-center gap-3 p-10 text-center">
-      <Icon name="store" size={28} class="muted" />
-      <p class="text-sm font-medium">No apps installed yet</p>
-      <p class="muted max-w-sm text-sm">
-        Install one from the store, or label any container with
-        <code class="rounded bg-[rgb(var(--ink-muted)/0.15)] px-1">homeos.enable=true</code>
-        and it appears here.
+    <div class="panel flex flex-col items-center gap-2 px-6 py-8 text-center">
+      <Icon name="store" size={22} class="faint" />
+      <p class="text-sm font-medium">Nothing installed yet</p>
+      <p class="muted max-w-sm text-[13px]">
+        Install something from the store, or label any container with
+        <code class="mono rounded bg-[rgb(var(--ink-3)/0.15)] px-1">homeos.enable=true</code>
+        and it turns up here on its own.
       </p>
       <button class="btn btn-primary mt-1" onclick={() => onnavigate('store')}>
         Browse the store
       </button>
     </div>
   {:else}
-    <div class="grid gap-4 grid-cols-[repeat(auto-fill,minmax(9rem,1fr))]">
+    <div class="grid gap-2.5 grid-cols-[repeat(auto-fill,minmax(8rem,1fr))]">
       {#each sortedApps as app (app.id)}
         <AppTile {app} job={installs.byApp[app.id]} onmenu={openMenu} />
       {/each}
     </div>
   {/if}
 </section>
+
+<!-- Vitals: one strip, five readings. What two gauges and four cards used to
+     say in most of a screen. -->
+<VitalsBar />
+
+{#if (m?.filesystems ?? []).length}
+  <section class="panel mt-4 divide-y divide-[rgb(var(--line)/var(--line-a))]">
+    {#each m.filesystems as fs (fs.mountpoint)}
+      <div class="flex items-center gap-3 px-3.5 py-2.5">
+        <Icon name="hdd" size={14} class="faint shrink-0" />
+        <span class="mono w-40 shrink-0 truncate text-[13px]">{fs.mountpoint}</span>
+        <div class="h-[3px] min-w-16 flex-1 overflow-hidden rounded-full bg-[rgb(var(--ink-3)/0.22)]">
+          <div class="h-full rounded-full"
+               style="width:{fs.used_percent}%;
+                      background:{fs.used_percent >= 90 ? 'var(--color-bad)'
+                                : fs.used_percent >= 75 ? 'var(--color-warn)' : 'var(--color-ok)'}"></div>
+        </div>
+        <span class="readout faint shrink-0 text-[12px] tabular">
+          {bytes(fs.free_bytes)} free
+        </span>
+        <span class="faint hidden shrink-0 text-[11px] sm:inline">{fs.fstype}</span>
+      </div>
+    {/each}
+  </section>
+{/if}
 
 <ContextMenu bind:open={menuOpen} anchor={menuAnchor} items={menuItems} onselect={onMenuSelect} />

@@ -1,50 +1,66 @@
 @import 'tailwindcss';
 
-/* Dark mode is driven by a class on <html>, set before first paint by the
-   inline script in index.html, so the toggle can override the OS preference. */
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* ---------------------------------------------------------------------------
+   HomeOS reads as instrumentation, not as a web app. Two rules follow from
+   that and shape everything below:
+
+   1. Colour means state. Green, amber and red say something about a disk or a
+      container; nothing else in the interface is allowed to use them. The
+      chrome is neutral so that when something turns amber, it is the only
+      thing on screen that has.
+
+   2. Numbers are the content. They get the monospace face, tabular figures and
+      the most contrast; labels and chrome recede.
+
+   The accent is copper — a drive activity LED — kept well away from the amber
+   that means "warning", and used only for interaction and identity.
+   --------------------------------------------------------------------------- */
+
 @theme {
-  /* One accent ramp. A dashboard full of competing hues reads as noise; the
-     colour budget is spent on status (green/amber/red) instead. */
-  --color-accent-50:  oklch(0.97 0.02 250);
-  --color-accent-200: oklch(0.88 0.07 250);
-  --color-accent-400: oklch(0.72 0.15 255);
-  --color-accent-500: oklch(0.65 0.18 258);
-  --color-accent-600: oklch(0.57 0.19 260);
-  --color-accent-700: oklch(0.48 0.17 261);
+  --color-accent-300: oklch(0.80 0.11 52);
+  --color-accent-400: oklch(0.72 0.14 48);
+  --color-accent-500: oklch(0.63 0.16 45);
+  --color-accent-600: oklch(0.54 0.15 43);
 
-  /* Status colours are the only other hues, and they carry meaning:
-     ok / warn / bad, used identically by gauges, tiles and badges. */
-  --color-ok:   oklch(0.72 0.17 152);
-  --color-warn: oklch(0.79 0.16 78);
-  --color-bad:  oklch(0.64 0.21 25);
+  --color-ok:   oklch(0.68 0.16 150);
+  --color-warn: oklch(0.78 0.15 88);
+  --color-bad:  oklch(0.62 0.21 27);
 
-  --radius-panel: 1.25rem;
-  --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto,
-               'Helvetica Neue', Arial, sans-serif;
-  --font-mono: ui-monospace, 'SF Mono', 'Cascadia Code', Menlo, Consolas, monospace;
+  --radius-panel: 0.625rem;
+
+  --font-sans: Archivo, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'Cascadia Code', Menlo, Consolas, monospace;
 }
 
 @layer base {
+  /* Graphite with a warm bias, so the copper sits in the same world rather
+     than on top of a cold grey. */
   :root {
-    /* Surfaces are defined once as tokens so the glass treatment below stays
-       consistent and a theme change is a handful of variable swaps. */
-    --surface: 255 255 255;
-    --surface-alpha: 0.58;
-    --ink: 15 23 42;
-    --ink-muted: 71 85 105;
-    --hairline: 15 23 42;
-    --hairline-alpha: 0.08;
+    --ground:    250 249 247;
+    --surface:   255 255 255;
+    --raised:    244 242 239;
+    --ink:       24 23 22;
+    --ink-2:     94 92 89;
+    --ink-3:     141 138 134;
+    --line:      24 22 20;
+    --line-a:    0.12;
+    --shadow:    0 0 0;
+    --shadow-a:  0.06;
   }
 
   :root.dark {
-    --surface: 30 41 59;
-    --surface-alpha: 0.55;
-    --ink: 241 245 249;
-    --ink-muted: 148 163 184;
-    --hairline: 255 255 255;
-    --hairline-alpha: 0.1;
+    --ground:    18 17 16;
+    --surface:   28 26 25;
+    --raised:    38 36 34;
+    --ink:       239 238 236;
+    --ink-2:     158 155 151;
+    --ink-3:     114 111 108;
+    --line:      255 250 245;
+    --line-a:    0.10;
+    --shadow:    0 0 0;
+    --shadow-a:  0.4;
   }
 
   html { -webkit-tap-highlight-color: transparent; }
@@ -52,134 +68,149 @@
   body {
     margin: 0;
     min-height: 100dvh;
-    font-family: var(--font-sans);
+    background: rgb(var(--ground));
     color: rgb(var(--ink));
-    /* Slightly deeper than the panels, so a translucent panel reads as
-       floating above the ground rather than merging into it. */
-    background-color: #dde5f0;
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.5;
+    font-synthesis-weight: none;
     -webkit-font-smoothing: antialiased;
   }
 
-  :root.dark body { background-color: #070b14; }
+  /* No drifting gradient. A panel that animates behind the numbers you are
+     trying to read is decoration competing with the content, and it costs a
+     Raspberry Pi's GPU something for nothing. */
 
-  /* The dynamic backdrop: two slow-drifting radial washes behind everything.
-     Fixed rather than scrolling so panels appear to move over it. */
-  body::before {
-    content: '';
-    position: fixed;
-    inset: -20%;
-    z-index: -1;
-    background:
-      radial-gradient(45rem 45rem at 15% 10%, oklch(0.62 0.19 258 / 0.5), transparent 62%),
-      radial-gradient(40rem 40rem at 85% 85%, oklch(0.68 0.17 190 / 0.42), transparent 62%),
-      radial-gradient(30rem 30rem at 60% 30%, oklch(0.7 0.15 300 / 0.22), transparent 65%);
-    animation: drift 40s ease-in-out infinite alternate;
+  :focus-visible {
+    outline: 2px solid var(--color-accent-500);
+    outline-offset: 1px;
+    border-radius: 3px;
   }
 
-  :root.dark body::before {
-    background:
-      radial-gradient(45rem 45rem at 15% 10%, oklch(0.65 0.18 258 / 0.3), transparent 60%),
-      radial-gradient(40rem 40rem at 85% 85%, oklch(0.7 0.16 190 / 0.24), transparent 60%);
-  }
-
-  @keyframes drift {
-    from { transform: translate3d(-2%, -1%, 0) scale(1); }
-    to   { transform: translate3d(2%, 3%, 0) scale(1.08); }
-  }
-
-  /* A wall-mounted dashboard runs for weeks. Respect the setting that says
-     "stop moving things"; the gradient stays, it just stops drifting. */
   @media (prefers-reduced-motion: reduce) {
-    body::before { animation: none; }
     *, *::before, *::after {
       animation-duration: 0.01ms !important;
       transition-duration: 0.01ms !important;
     }
   }
 
-  /* Focus is never removed, only restyled: this is the only way to drive the
-     dashboard from a keyboard. */
-  :focus-visible {
-    outline: 2px solid var(--color-accent-400);
-    outline-offset: 2px;
-    border-radius: 0.375rem;
-  }
-
   ::-webkit-scrollbar { width: 10px; height: 10px; }
   ::-webkit-scrollbar-thumb {
-    background: rgb(var(--ink-muted) / 0.35);
+    background: rgb(var(--ink-3) / 0.4);
     border-radius: 99px;
-    border: 2px solid transparent;
+    border: 3px solid transparent;
     background-clip: content-box;
   }
-  ::-webkit-scrollbar-thumb:hover { background: rgb(var(--ink-muted) / 0.55); background-clip: content-box; }
   ::-webkit-scrollbar-track { background: transparent; }
 }
 
 @layer components {
-  /* The glass panel. backdrop-filter is expensive on a Raspberry Pi's GPU, so
-     it is defined once here and used on containers only, never on the dozens
-     of small elements inside them. */
-  .glass {
-    background: rgb(var(--surface) / var(--surface-alpha));
-    border: 1px solid rgb(var(--hairline) / var(--hairline-alpha));
+  /* Flat surfaces with a hairline, not glass. The blur was the single most
+     generic thing about the old design and the most expensive to paint. */
+  .panel {
+    background: rgb(var(--surface));
+    border: 1px solid rgb(var(--line) / var(--line-a));
     border-radius: var(--radius-panel);
-    backdrop-filter: blur(16px) saturate(1.4);
-    -webkit-backdrop-filter: blur(16px) saturate(1.4);
-    box-shadow: 0 8px 32px -12px rgb(0 0 0 / 0.25);
   }
 
-  .glass-hover {
-    transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+  .panel-hover {
+    transition: border-color 120ms ease, background 120ms ease;
   }
-  .glass-hover:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 16px 40px -14px rgb(0 0 0 / 0.35);
-    border-color: rgb(var(--hairline) / 0.2);
+  .panel-hover:hover {
+    border-color: rgb(var(--line) / 0.24);
+    background: rgb(var(--raised));
   }
 
-  .muted { color: rgb(var(--ink-muted)); }
+  .muted   { color: rgb(var(--ink-2)); }
+  .faint   { color: rgb(var(--ink-3)); }
+  .tabular { font-variant-numeric: tabular-nums; font-feature-settings: 'tnum'; }
+
+  /* Labels are small, spaced and quiet — the instrument's engraving, not its
+     reading. */
+  .label {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: rgb(var(--ink-3));
+  }
+
+  /* The reading itself: monospace, tabular, so a changing number does not
+     make the row jitter. */
+  .unit {
+    font-family: var(--font-sans);
+    font-size: 0.6875rem;
+    font-weight: 500;
+    color: rgb(var(--ink-3));
+    letter-spacing: 0.01em;
+  }
+
+  .readout {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum';
+    letter-spacing: -0.02em;
+  }
 
   .btn {
-    display: inline-flex; align-items: center; gap: 0.5rem;
-    padding: 0.5rem 0.9rem; border-radius: 0.75rem;
-    font-size: 0.875rem; font-weight: 500;
-    border: 1px solid rgb(var(--hairline) / var(--hairline-alpha));
-    background: rgb(var(--surface) / 0.5);
+    display: inline-flex; align-items: center; gap: 0.4rem;
+    padding: 0.35rem 0.7rem;
+    border-radius: 0.4rem;
+    font-size: 0.8125rem; font-weight: 500;
+    border: 1px solid rgb(var(--line) / var(--line-a));
+    background: rgb(var(--surface));
     color: rgb(var(--ink));
     cursor: pointer;
-    transition: background 140ms ease, border-color 140ms ease, opacity 140ms ease;
+    transition: background 120ms ease, border-color 120ms ease;
   }
-  .btn:hover:not(:disabled) { background: rgb(var(--surface) / 0.85); }
-  .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+  .btn:hover:not(:disabled) { background: rgb(var(--raised)); border-color: rgb(var(--line) / 0.22); }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
   .btn-primary {
     background: var(--color-accent-500);
     border-color: transparent;
-    color: white;
+    color: rgb(255 252 250);
   }
-  .btn-primary:hover:not(:disabled) { background: var(--color-accent-600); }
+  .btn-primary:hover:not(:disabled) { background: var(--color-accent-600); border-color: transparent; }
 
-  .btn-danger { background: var(--color-bad); border-color: transparent; color: white; }
-  .btn-danger:hover:not(:disabled) { filter: brightness(0.92); }
+  .btn-danger { background: var(--color-bad); border-color: transparent; color: rgb(255 252 250); }
+  .btn-danger:hover:not(:disabled) { filter: brightness(0.92); border-color: transparent; }
 
   .field {
     width: 100%;
-    padding: 0.55rem 0.75rem;
-    border-radius: 0.75rem;
-    border: 1px solid rgb(var(--hairline) / 0.18);
-    background: rgb(var(--surface) / 0.6);
+    padding: 0.4rem 0.6rem;
+    border-radius: 0.4rem;
+    border: 1px solid rgb(var(--line) / 0.18);
+    background: rgb(var(--ground));
     color: rgb(var(--ink));
-    font-size: 0.875rem;
+    font-size: 0.8125rem;
   }
-  .field::placeholder { color: rgb(var(--ink-muted) / 0.8); }
+  .field::placeholder { color: rgb(var(--ink-3)); }
+  .field:focus { border-color: var(--color-accent-400); outline: none; }
 
   .chip {
-    display: inline-flex; align-items: center; gap: 0.35rem;
-    padding: 0.2rem 0.6rem; border-radius: 99px;
-    font-size: 0.75rem; font-weight: 500;
-    border: 1px solid rgb(var(--hairline) / 0.14);
+    display: inline-flex; align-items: center; gap: 0.25rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: 0.25rem;
+    font-size: 0.6875rem; font-weight: 500;
+    border: 1px solid rgb(var(--line) / 0.14);
+    color: rgb(var(--ink-2));
   }
 
-  .tabular { font-variant-numeric: tabular-nums; }
+  /* State is carried by a coloured bar on the left edge as well as by hue, so
+     it survives being printed, screenshotted badly, or read by someone who
+     cannot separate red from green. */
+  .note {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 0.5rem;
+    padding: 0.6rem 0.75rem;
+    border-radius: 0.4rem;
+    border-left: 3px solid var(--color-accent-500);
+    background: rgb(var(--raised));
+    font-size: 0.8125rem;
+  }
+  .note.warn { border-left-color: var(--color-warn); }
+  .note.bad  { border-left-color: var(--color-bad); }
+  .note.good { border-left-color: var(--color-ok); }
 }

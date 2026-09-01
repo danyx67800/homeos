@@ -37,12 +37,10 @@
       mountRoot = r.mount_root ?? mountRoot;
       error = '';
     } catch (err) {
-      // 503 means the storage tooling is absent (a container-based install, a
-      // stripped image), which is worth saying plainly rather than as a
-      // generic failure.
-      error = err.status === 503
-        ? 'Storage management is unavailable on this system. ' + err.message
-        : err.message;
+      // The API already says why on a 503 — "storage tooling is not available
+      // on this system: ... lsblk". Prefixing it repeated the same sentence
+      // twice in one line.
+      error = err.message;
     } finally {
       loading = false;
     }
@@ -157,15 +155,15 @@
 </section>
 
 {#if error}
-  <div class="glass flex items-center gap-3 p-5 text-sm text-[var(--color-bad)]">
+  <div class="panel flex items-center gap-3 p-5 text-sm text-[var(--color-bad)]">
     <Icon name="warn" size={18} /><span>{error}</span>
   </div>
 {:else if loading}
   <div class="flex flex-col gap-4">
-    {#each Array(2) as _, i (i)}<div class="glass h-36 animate-pulse opacity-50"></div>{/each}
+    {#each Array(2) as _, i (i)}<div class="panel h-36 animate-pulse opacity-50"></div>{/each}
   </div>
 {:else if !disks.length}
-  <div class="glass flex flex-col items-center gap-3 p-10 text-center">
+  <div class="panel flex flex-col items-center gap-3 p-10 text-center">
     <Icon name="hdd" size={26} class="muted" />
     <p class="text-sm font-medium">No disks detected</p>
     <p class="muted max-w-sm text-sm">
@@ -177,7 +175,7 @@
   <div class="flex flex-col gap-4">
     {#each disks as disk (disk.path)}
       {@const badge = healthBadge(disk)}
-      <article class="glass p-5">
+      <article class="panel p-5">
         <header class="mb-4 flex flex-wrap items-start justify-between gap-3">
           <div class="min-w-0">
             <div class="flex flex-wrap items-center gap-2">
@@ -342,21 +340,21 @@
   {:else}
     <div class="flex flex-col gap-5">
       <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <div class="rounded-xl bg-[rgb(var(--ink-muted)/0.08)] p-3">
+        <div class="rounded-xl bg-[rgb(var(--ink-2)/0.08)] p-3">
           <p class="muted text-xs">Status</p>
           <p class="mt-0.5 font-medium {health.passed ? 'text-[var(--color-ok)]' : 'text-[var(--color-bad)]'}">
             {health.passed ? 'Passed' : 'Failed'}
           </p>
         </div>
-        <div class="rounded-xl bg-[rgb(var(--ink-muted)/0.08)] p-3">
+        <div class="rounded-xl bg-[rgb(var(--ink-2)/0.08)] p-3">
           <p class="muted text-xs">Temperature</p>
           <p class="mt-0.5 font-medium tabular">{celsius(health.temperature_celsius)}</p>
         </div>
-        <div class="rounded-xl bg-[rgb(var(--ink-muted)/0.08)] p-3">
+        <div class="rounded-xl bg-[rgb(var(--ink-2)/0.08)] p-3">
           <p class="muted text-xs">Powered on</p>
           <p class="mt-0.5 font-medium tabular">{duration((health.power_on_hours ?? 0) * 3600)}</p>
         </div>
-        <div class="rounded-xl bg-[rgb(var(--ink-muted)/0.08)] p-3">
+        <div class="rounded-xl bg-[rgb(var(--ink-2)/0.08)] p-3">
           <p class="muted text-xs">{health.percentage_used ? 'Endurance used' : 'Power cycles'}</p>
           <p class="mt-0.5 font-medium tabular">
             {health.percentage_used ? `${health.percentage_used}%` : (health.power_cycle_count ?? '—')}
@@ -400,7 +398,7 @@
               </thead>
               <tbody class="tabular">
                 {#each health.attributes as a (a.id)}
-                  <tr class="border-t border-[rgb(var(--hairline)/0.08)]
+                  <tr class="border-t border-[rgb(var(--line)/0.08)]
                              {a.failing ? 'text-[var(--color-bad)]' : ''}">
                     <td class="py-1 pr-3">{a.id}</td>
                     <td class="py-1 pr-3 font-sans">{a.name}</td>

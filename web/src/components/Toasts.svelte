@@ -16,7 +16,7 @@
      aria-live="polite" aria-atomic="false">
   {#each toasts.items as t (t.id)}
     <div
-      class="glass pointer-events-auto flex items-start gap-3 px-4 py-3 text-sm"
+      class="panel pointer-events-auto flex items-start gap-3 px-4 py-3 text-sm"
       transition:fly={{ y: 12, duration: 180 }}
     >
       <Icon name={STYLE[t.kind].icon} size={18} class={STYLE[t.kind].klass} />

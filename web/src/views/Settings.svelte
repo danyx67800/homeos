@@ -37,7 +37,7 @@
 </script>
 
 <div class="flex max-w-3xl flex-col gap-5">
-  <section class="glass p-5">
+  <section class="panel p-5">
     <h2 class="mb-4 flex items-center gap-2 text-sm font-semibold">
       <Icon name="info" size={16} /> System
     </h2>
@@ -63,7 +63,7 @@
 
   <UpdatePanel version={info?.version} />
 
-  <section class="glass p-5">
+  <section class="panel p-5">
     <h2 class="mb-4 flex items-center gap-2 text-sm font-semibold">
       <Icon name="sun" size={16} /> Appearance
     </h2>
@@ -81,7 +81,7 @@
     </label>
   </section>
 
-  <section class="glass p-5">
+  <section class="panel p-5">
     <h2 class="mb-4 flex items-center gap-2 text-sm font-semibold">
       <Icon name="lock" size={16} /> Password
     </h2>

@@ -45,9 +45,9 @@
   class="m-auto w-[calc(100vw-2rem)] {WIDTH[size]} bg-transparent p-0
          backdrop:bg-black/50 backdrop:backdrop-blur-sm"
 >
-  <div class="glass max-h-[85dvh] overflow-hidden flex flex-col">
+  <div class="panel max-h-[85dvh] overflow-hidden flex flex-col">
     <header class="flex items-start justify-between gap-4 border-b
-                   border-[rgb(var(--hairline)/0.1)] px-5 py-4">
+                   border-[rgb(var(--line)/0.1)] px-5 py-4">
       <div class="min-w-0">
         <h2 class="truncate text-base font-semibold">{title}</h2>
         {#if subtitle}<p class="muted mt-0.5 text-sm">{subtitle}</p>{/if}
@@ -63,7 +63,7 @@
 
     {#if footer}
       <footer class="flex items-center justify-end gap-2 border-t
-                     border-[rgb(var(--hairline)/0.1)] px-5 py-3">
+                     border-[rgb(var(--line)/0.1)] px-5 py-3">
         {@render footer()}
       </footer>
     {/if}

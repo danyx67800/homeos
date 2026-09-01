@@ -40,7 +40,7 @@
   $effect(() => { updates.refresh(); });
 </script>
 
-<section class="glass p-5">
+<section class="panel p-5">
   <h2 class="mb-4 flex items-center gap-2 text-sm font-semibold">
     <Icon name="refresh" size={16} /> Software updates
   </h2>
@@ -48,7 +48,7 @@
   {#if st === null}
     <p class="muted text-sm">
       Over-the-air updates are not configured on this appliance. Set
-      <code class="rounded bg-[rgb(var(--ink-muted)/0.15)] px-1">update.channel_url</code>
+      <code class="rounded bg-[rgb(var(--ink-2)/0.15)] px-1">update.channel_url</code>
       in <code class="font-mono">/etc/homeos/config.yaml</code> to enable them.
     </p>
   {:else}
@@ -86,7 +86,7 @@
             <span>{st.message || 'Downloading'}</span>
             <span class="muted tabular text-xs">{st.progress ?? 0}%</span>
           </div>
-          <div class="h-2 overflow-hidden rounded-full bg-[rgb(var(--ink-muted)/0.16)]">
+          <div class="h-2 overflow-hidden rounded-full bg-[rgb(var(--ink-2)/0.16)]">
             <div class="h-full rounded-full bg-[var(--color-accent-500)] transition-[width] duration-300"
                  style="width:{st.progress ?? 0}%"></div>
           </div>
@@ -107,7 +107,7 @@
         </div>
 
       {:else if rel}
-        <div class="rounded-xl bg-[rgb(var(--ink-muted)/0.08)] p-3">
+        <div class="rounded-xl bg-[rgb(var(--ink-2)/0.08)] p-3">
           <p class="text-sm font-medium">Version {rel.version} is available</p>
           {#if rel.notes}
             <p class="muted mt-1 whitespace-pre-line text-xs leading-relaxed">{rel.notes}</p>
@@ -132,7 +132,7 @@
            so a rollback the daemon was not alive to see still gets reported. -->
       {#if updates.lastApply}
         {@const la = updates.lastApply}
-        <p class="muted border-t border-[rgb(var(--hairline)/0.1)] pt-3 text-xs">
+        <p class="muted border-t border-[rgb(var(--line)/0.1)] pt-3 text-xs">
           {#if la.status === 'rolled_back'}
             <span class="text-[var(--color-warn)]">
               Version {la.version} was rolled back: {la.message}

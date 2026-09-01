@@ -146,22 +146,22 @@
       class="chip shrink-0 transition-colors
              {category === c.id
                ? 'bg-[var(--color-accent-500)] text-white border-transparent'
-               : 'hover:bg-[rgb(var(--surface)/0.8)]'}"
+               : 'hover:bg-[rgb(var(--surface))]'}"
       onclick={() => (category = c.id)}
     >{c.label}</button>
   {/each}
 </div>
 
 {#if error}
-  <div class="glass flex items-center gap-3 p-5 text-sm text-[var(--color-bad)]">
+  <div class="panel flex items-center gap-3 p-5 text-sm text-[var(--color-bad)]">
     <Icon name="warn" size={18} /><span>{error}</span>
   </div>
 {:else if loading}
   <div class="grid gap-4 grid-cols-[repeat(auto-fill,minmax(16rem,1fr))]">
-    {#each Array(6) as _, i (i)}<div class="glass h-32 animate-pulse opacity-50"></div>{/each}
+    {#each Array(6) as _, i (i)}<div class="panel h-32 animate-pulse opacity-50"></div>{/each}
   </div>
 {:else if !visible.length}
-  <div class="glass flex flex-col items-center gap-3 p-10 text-center">
+  <div class="panel flex flex-col items-center gap-3 p-10 text-center">
     <Icon name="search" size={26} class="muted" />
     <p class="text-sm font-medium">Nothing matches</p>
     <p class="muted max-w-sm text-sm">
@@ -174,10 +174,10 @@
   <div class="grid gap-4 grid-cols-[repeat(auto-fill,minmax(16rem,1fr))]">
     {#each visible as app (app.id)}
       {@const job = installs.byApp[app.id]}
-      <button class="glass glass-hover flex gap-3.5 p-4 text-left"
+      <button class="panel panel-hover flex gap-3.5 p-4 text-left"
               onclick={() => openDetail(app.id)}>
         <div class="grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-xl
-                    bg-[rgb(var(--surface)/0.9)] ring-1 ring-[rgb(var(--hairline)/0.12)]">
+                    bg-[rgb(var(--surface))] ring-1 ring-[rgb(var(--line)/0.12)]">
           {#if app.icon}
             <img src={api.storeIconUrl(app.id)} alt="" class="h-8 w-8 object-contain" loading="lazy" />
           {:else}
@@ -215,7 +215,7 @@
 <!-- Manifests the backend refused. Surfaced rather than hidden so a catalogue
      author can see why their app is missing instead of guessing. -->
 {#if Object.keys(rejected).length}
-  <details class="glass mt-6 p-4 text-sm">
+  <details class="panel mt-6 p-4 text-sm">
     <summary class="cursor-pointer font-medium text-[var(--color-warn)]">
       {Object.keys(rejected).length} manifest(s) rejected
     </summary>
@@ -261,7 +261,7 @@
 
       <!-- The routing mode is shown because it determines the URL the app will
            live at, which is the first thing people ask after installing. -->
-      <div class="muted grid gap-2 rounded-xl bg-[rgb(var(--ink-muted)/0.08)] p-3 text-xs">
+      <div class="muted grid gap-2 rounded-xl bg-[rgb(var(--ink-2)/0.08)] p-3 text-xs">
         <div class="flex justify-between gap-4">
           <span>Image</span><code class="truncate text-right">{detail.image}</code>
         </div>

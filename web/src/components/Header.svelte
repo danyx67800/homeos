@@ -32,7 +32,7 @@
   const conn = $derived(CONNECTION[telemetry.state] ?? CONNECTION.offline);
 </script>
 
-<header class="glass sticky top-3 z-30 mx-3 mb-5 flex flex-wrap items-center gap-x-5 gap-y-3 px-4 py-3">
+<header class="panel sticky top-3 z-30 mx-3 mb-5 flex flex-wrap items-center gap-x-5 gap-y-3 px-4 py-3">
   <!-- Identity and clock -->
   <div class="flex items-center gap-3">
     <div class="grid h-9 w-9 place-items-center rounded-xl bg-[var(--color-accent-500)] text-white">

@@ -3,11 +3,11 @@
   import { api } from '../lib/api.js';
 
   /**
-   * One app in the launcher grid.
+   * One app in the launcher.
    *
-   * The tile is a link, not a button: opening the app is the overwhelmingly
-   * common action, so it should middle-click into a new tab and show its URL
-   * on hover like any other link. Management lives behind the menu button.
+   * A link, not a button: opening the app is what people came for, so it should
+   * middle-click into a new tab and show its URL on hover like any other link.
+   * Management lives behind the menu that appears on hover.
    */
   let { app, job = null, onmenu = () => {} } = $props();
 
@@ -17,16 +17,16 @@
   const busy = $derived(job && !['installed', 'removed', 'failed'].includes(job.state));
   const running = $derived(app.state === 'running');
 
+  // Status is a dot *and* a word. A colour alone is not a state anyone can read
+  // reliably, and the word is what tells you "unhealthy" from "stopped".
   const status = $derived.by(() => {
-    if (busy) return { klass: 'bg-[var(--color-accent-400)]', label: job.state, pulse: true };
-    if (app.health === 'unhealthy') return { klass: 'bg-[var(--color-bad)]', label: 'unhealthy' };
-    if (app.health === 'starting') return { klass: 'bg-[var(--color-warn)]', label: 'starting', pulse: true };
-    if (running) return { klass: 'bg-[var(--color-ok)]', label: 'running' };
-    return { klass: 'bg-[rgb(var(--ink-muted))]', label: app.state || 'stopped' };
+    if (busy) return { colour: 'var(--color-accent-500)', text: job.message || job.state, pulse: true };
+    if (app.health === 'unhealthy') return { colour: 'var(--color-bad)', text: 'unhealthy' };
+    if (app.health === 'starting') return { colour: 'var(--color-warn)', text: 'starting', pulse: true };
+    if (running) return { colour: 'var(--color-ok)', text: 'running' };
+    return { colour: 'rgb(var(--ink-3))', text: app.state || 'stopped' };
   });
 
-  // The first letter is the fallback when a catalogue ships no icon, or when
-  // the app was installed from a catalogue that has since moved on.
   const initial = $derived((app.name || app.id || '?').charAt(0).toUpperCase());
 </script>
 
@@ -35,54 +35,47 @@
     href={app.url || '#'}
     target="_blank"
     rel="noopener noreferrer"
-    class="glass glass-hover flex flex-col items-center gap-3 p-4 text-center
-           {running ? '' : 'opacity-70'} {app.url ? '' : 'pointer-events-none'}"
+    class="panel panel-hover flex flex-col items-center gap-2 px-3 py-3.5 text-center
+           {running || busy ? '' : 'opacity-60'} {app.url ? '' : 'pointer-events-none'}"
     aria-label="Open {app.name}"
   >
-    <div class="relative">
-      <div class="grid h-16 w-16 place-items-center overflow-hidden rounded-2xl
-                  bg-[rgb(var(--surface)/0.9)] ring-1 ring-[rgb(var(--hairline)/0.12)]">
-        {#if app.icon && !iconFailed}
-          <img src={api.storeIconUrl(app.id)} alt="" class="h-10 w-10 object-contain"
-               loading="lazy" onerror={() => (iconFailed = true)} />
-        {:else}
-          <span class="text-2xl font-semibold text-[var(--color-accent-400)]">{initial}</span>
-        {/if}
-      </div>
-
-      <span
-        class="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full
-               ring-2 ring-[rgb(var(--surface))] {status.klass}
-               {status.pulse ? 'animate-pulse' : ''}"
-        title={status.label}
-      ></span>
+    <div class="grid h-11 w-11 place-items-center overflow-hidden rounded-lg
+                bg-[rgb(var(--raised))] text-[var(--color-accent-500)]">
+      {#if app.icon && !iconFailed}
+        <img src={api.storeIconUrl(app.id)} alt="" class="h-7 w-7 object-contain"
+             loading="lazy" onerror={() => (iconFailed = true)} />
+      {:else}
+        <span class="text-lg font-semibold">{initial}</span>
+      {/if}
     </div>
 
     <div class="min-w-0 w-full">
-      <p class="truncate text-sm font-medium">{app.name}</p>
-      <p class="muted truncate text-xs">{busy ? job.message || job.state : status.label}</p>
+      <p class="truncate text-[13px] font-medium leading-tight">{app.name}</p>
+      <p class="faint mt-0.5 flex items-center justify-center gap-1 truncate text-[11px]">
+        <span class="h-1.5 w-1.5 shrink-0 rounded-full {status.pulse ? 'animate-pulse' : ''}"
+              style="background:{status.colour}"></span>
+        <span class="truncate">{status.text}</span>
+      </p>
     </div>
   </a>
 
-  <!-- Progress replaces the subtitle area during an install, so the tile does
-       not change height and the grid stays still. -->
   {#if busy}
-    <div class="absolute inset-x-4 bottom-3 h-1 overflow-hidden rounded-full
-                bg-[rgb(var(--ink-muted)/0.2)]">
-      <div class="h-full rounded-full bg-[var(--color-accent-400)]
-                  transition-[width] duration-300"
+    <div class="absolute inset-x-3 bottom-2 h-[2px] overflow-hidden rounded-full
+                bg-[rgb(var(--ink-3)/0.25)]">
+      <div class="h-full rounded-full bg-[var(--color-accent-500)] transition-[width] duration-300"
            style="width:{job.progress ?? 0}%"></div>
     </div>
   {/if}
 
   <button
     bind:this={menuButton}
-    class="absolute right-2 top-2 grid h-7 w-7 place-items-center rounded-lg
-           bg-[rgb(var(--surface)/0.9)] opacity-0 transition-opacity
+    class="absolute right-1.5 top-1.5 grid h-6 w-6 place-items-center rounded
+           bg-[rgb(var(--surface))] text-[rgb(var(--ink-2))] opacity-0
+           ring-1 ring-[rgb(var(--line)/var(--line-a))] transition-opacity
            group-hover:opacity-100 focus-visible:opacity-100"
     onclick={(e) => { e.preventDefault(); onmenu(app, menuButton); }}
     aria-label="Actions for {app.name}"
   >
-    <Icon name="settings" size={14} />
+    <Icon name="settings" size={12} />
   </button>
 </div>
