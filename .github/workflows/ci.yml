@@ -124,6 +124,20 @@ jobs:
           test -f /etc/homeos/proxy/routes.d/00-lan.lan.caddy ||
             { echo "::error::reconfigure wrote no LAN guard"; exit 1; }
 
+          # Again, on a tree that is already correct. This is the run that
+          # matters: "the file was already right" used to be reported as a
+          # failure, which under set -e stopped the stage part-way through and
+          # skipped the files after it. A first install never hits that case.
+          sudo rm -rf /etc/homeos/proxy
+          sudo ./install.sh --reconfigure || true
+          sudo ./install.sh --reconfigure || true
+          for f in Caddyfile routes.d/00-lan.lan.caddy \
+                   routes.d/00-placeholder.site.caddy routes.d/00-placeholder.path.caddy; do
+            test -f "/etc/homeos/proxy/$f" ||
+              { echo "::error::second reconfigure lost /etc/homeos/proxy/$f"; exit 1; }
+          done
+          echo "reconfigure is idempotent"
+
           # It must have taken the hostname from config.yaml, not the default.
           grep -q 'nas-di-marco' /etc/homeos/proxy/Caddyfile ||
             { echo "::error::reconfigure ignored the configured hostname"; exit 1; }

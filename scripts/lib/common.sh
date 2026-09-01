@@ -116,15 +116,37 @@ backup_file() {
 
 # write_file <path> [mode] [owner:group] — content on stdin, written atomically.
 # Returns 0 when the file changed, 10 when it was already byte-identical.
+# Set by every write_file call: "yes" if the file's content differs from what
+# was already there, "no" if it was already correct. Read it immediately after
+# the call — the next write overwrites it.
+HOMEOS_FILE_CHANGED=no
+
 write_file() {
     local path="$1" mode="${2:-0644}" own="${3:-root:root}"
-    local tmp
+    local tmp dir
+    # The parent has to exist before the atomic rename lands, and the caller
+    # cannot always know that it does: a package that owns the directory may
+    # simply not be installed. Without this the write fails with a bare "No such
+    # file or directory" naming the target, which reads like a permission
+    # problem rather than a missing directory.
+    dir="$(dirname "$path")"
+    [[ -d "$dir" ]] || mkdir -p "$dir" || { log::error "cannot create $dir"; return 1; }
     tmp="$(mktemp "${path}.homeos.XXXXXX" 2>/dev/null)" || tmp="$(mktemp)"
     cat >"$tmp"
+    HOMEOS_FILE_CHANGED=yes
     if [[ -f "$path" ]] && cmp -s "$tmp" "$path"; then
         rm -f "$tmp"
         log::skip "unchanged: $path"
-        return 10
+        # Deliberately 0, not a distinct code. Under `set -e` a non-zero return
+        # aborts whichever function is mid-way through writing its files, and
+        # almost every caller ignores the value — so signalling "nothing to do"
+        # by failing meant a stage that wrote three files silently wrote one and
+        # stopped as soon as any of them was already correct. That never showed
+        # during a first install, where nothing is ever unchanged, and appeared
+        # the moment a reapply became possible. Callers that care read
+        # HOMEOS_FILE_CHANGED, which is set on every call.
+        HOMEOS_FILE_CHANGED=no
+        return 0
     fi
     if [[ -n "${HOMEOS_DRY_RUN:-}" ]]; then
         printf '  %sdry%s write %s\n' "$C_YLW" "$C_RESET" "$path" >&2

@@ -382,13 +382,24 @@ stage::reconfigure() {
     [[ -n "$HOMEOS_PRIMARY_IFACE" ]] || HOMEOS_PRIMARY_IFACE="eth0"
     log::info "hostname ${HOMEOS_HOSTNAME}.local, routing ${HOMEOS_ROUTE_MODE}"
 
-    net::configure_avahi
-    proxy::install
-    fs::write_logrotate
-    stage::udev
-    stage::sudoers
-    stage::systemd
+    # Every stage is attempted even when an earlier one fails. They are
+    # independent writers, and abandoning the run at the first error is how a
+    # problem writing the mDNS config stopped the proxy config — the thing the
+    # update was carrying — from ever being written. A partial reapply reports
+    # failure at the end; it does not skip the rest on the way there.
+    local stage failed=()
+    for stage in net::configure_avahi proxy::install fs::write_logrotate \
+                 stage::udev stage::sudoers stage::systemd; do
+        if ! "$stage"; then
+            log::warn "${stage} failed"
+            failed+=("$stage")
+        fi
+    done
 
+    if (( ${#failed[@]} > 0 )); then
+        log::error "configuration reapplied with failures: ${failed[*]}"
+        return 1
+    fi
     log::ok "configuration reapplied"
 }
 

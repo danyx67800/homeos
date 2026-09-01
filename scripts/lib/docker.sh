@@ -82,8 +82,7 @@ docker::configure_daemon() {
 
     # Log rotation matters most here: an unbounded json-file driver is the
     # single most common way a self-hosting box fills its root filesystem.
-    local changed=0
-    write_file /etc/docker/daemon.json 0644 root:root <<'JSON' || changed=$?
+    write_file /etc/docker/daemon.json 0644 root:root <<'JSON'
 {
   "log-driver": "json-file",
   "log-opts": {
@@ -103,7 +102,7 @@ docker::configure_daemon() {
 }
 JSON
 
-    if (( changed == 0 )) && systemctl is-active --quiet docker 2>/dev/null; then
+    if [[ "$HOMEOS_FILE_CHANGED" == yes ]] && systemctl is-active --quiet docker 2>/dev/null; then
         log::info "daemon.json changed - restarting docker"
         run systemctl restart docker || log::warn "docker restart failed"
     fi
