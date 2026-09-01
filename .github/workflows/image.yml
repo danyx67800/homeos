@@ -101,7 +101,7 @@ jobs:
           ( cd backend && CGO_ENABLED=0 GOOS=linux GOARCH=${{ matrix.arch }} \
               go build -trimpath -ldflags "-s -w -X main.Version=${VERSION}" \
               -o "../dist/homeos-core-linux-${{ matrix.arch }}" ./cmd/homeos-core )
-          ( cd web && npm ci --omit=optional && npm run build )
+          ( cd web && npm ci && npm run build )
           ls -la dist/ web/dist/index.html
 
       - name: Build the root filesystem

@@ -12,7 +12,9 @@ WEBROOT := $(PREFIX)/web
 all: build
 
 build:
-	npm ci --omit=optional || npm install
+	# Rollup's native binary is a per-platform optional dependency, so
+	# --omit=optional breaks the build on every platform.
+	npm ci
 	npm run build
 
 dev:

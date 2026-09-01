@@ -50,7 +50,7 @@ PUBKEY_FILE="${SIGNING_KEY%.key}.pub"
 PUBKEY="$(tr -d '[:space:]' < "$PUBKEY_FILE")"
 
 step "Building the dashboard"
-( cd web && npm ci --omit=optional 2>/dev/null || npm install )
+( cd web && npm ci )
 ( cd web && npm run build )
 [[ -f web/dist/index.html ]] || die "the dashboard build produced no index.html"
 
