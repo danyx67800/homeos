@@ -85,7 +85,10 @@ for arch in "${ARCHES[@]}"; do
     # The installer travels with the release so that homeos-apply-update can run
     # its --reconfigure path. Without it an update can replace every executable
     # and still not fix a line in the Caddyfile the executables read.
-    cp install.sh "${stage}/"
+    # install -m0755, not cp: homeos-apply-update tests -x before running this
+    # and skips the reconfigure with only a log line if the bit is missing, so a
+    # lost permission would look like a successful update that changed nothing.
+    install -m 0755 install.sh "${stage}/install.sh"
 
     cp -r web/dist "${stage}/web"
     printf '%s\n' "$VERSION" > "${stage}/VERSION"
