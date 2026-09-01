@@ -52,6 +52,24 @@ if [[ "$(timedatectl show -p Timezone --value 2>/dev/null)" == "UTC" ]] \
     fi
 fi
 
+# --- Container network -----------------------------------------------------
+# An image is built in a chroot, where no Docker daemon is running, so the
+# shared edge network could not be created then. This is the first moment one
+# exists to talk to.
+if command -v docker >/dev/null 2>&1; then
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+        docker info >/dev/null 2>&1 && break
+        sleep 2
+    done
+    if docker info >/dev/null 2>&1; then
+        if ! docker network inspect homeos-edge >/dev/null 2>&1; then
+            docker network create --driver bridge --subnet 10.20.0.0/24                 --opt com.docker.network.bridge.name=homeos0                 --label homeos.managed=true --label homeos.role=edge                 homeos-edge >/dev/null 2>&1                 && log "created the homeos-edge network"                 || log "could not create homeos-edge; homeos-core will retry"
+        fi
+    else
+        log "Docker did not come up in time; homeos-edge will be created later"
+    fi
+fi
+
 # --- Reconcile the proxy against whatever containers already exist ---------
 if [[ -x /usr/lib/homeos/bin/homeos-proxy-sync ]]; then
     /usr/lib/homeos/bin/homeos-proxy-sync sync >/dev/null 2>&1 \

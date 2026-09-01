@@ -52,6 +52,17 @@ docker::install() {
     fi
 
     docker::configure_daemon
+
+    # A chroot has no running daemon to talk to. The packages and the
+    # configuration are what the image needs; the runtime checks belong on the
+    # machine that eventually boots it.
+    if [[ -n "${HOMEOS_IMAGE_BUILD:-}" ]]; then
+        run systemctl enable docker.service >/dev/null 2>&1 || true
+        log::skip "not starting Docker (building an image)"
+        log::ok "docker $(docker --version 2>/dev/null | awk '{print $3}' | tr -d ,)"
+        return 0
+    fi
+
     svc_enable_now docker.service || die "Docker failed to start"
 
     # The socket can take a moment after the unit reports active.
@@ -103,6 +114,14 @@ JSON
 # publishing host ports.
 docker::create_networks() {
     log::step "Container network fabric"
+
+    # Creating a network needs a live daemon. homeos-firstboot does it on the
+    # first real boot instead, which is also when the address pool in
+    # daemon.json actually takes effect.
+    if [[ -n "${HOMEOS_IMAGE_BUILD:-}" ]]; then
+        log::skip "deferring the $HOMEOS_EDGE_NET network to first boot"
+        return 0
+    fi
 
     if docker network inspect "$HOMEOS_EDGE_NET" >/dev/null 2>&1; then
         log::skip "network $HOMEOS_EDGE_NET exists"

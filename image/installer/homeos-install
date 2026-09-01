@@ -1,0 +1,149 @@
+#!/usr/bin/env bash
+#
+# homeos-install — write the HomeOS image to a disk.
+#
+# Runs on the live ISO. It does not install anything itself: it writes the same
+# .img that people flash by hand, so what lands on the disk is the artefact that
+# was built and tested, not a second installation path that can drift from it.
+#
+# Growing the filesystem to fill the disk is homeos-firstboot's job, which is
+# already how a hand-flashed image behaves.
+#
+set -euo pipefail
+
+IMAGE_DIR="${HOMEOS_IMAGE_DIR:-/run/live/medium/homeos}"
+BOLD=$'\033[1m'; DIM=$'\033[2m'; RED=$'\033[31m'; GRN=$'\033[32m'; YLW=$'\033[33m'; OFF=$'\033[0m'
+
+die() { printf '\n%s%s%s\n\n' "$RED" "$*" "$OFF" >&2; exit 1; }
+
+[[ "${EUID:-$(id -u)}" -eq 0 ]] || die "homeos-install must run as root"
+
+IMAGE="$(ls "${IMAGE_DIR}"/homeos-*.img.xz 2>/dev/null | head -n1 || true)"
+[[ -n "$IMAGE" ]] || die "No HomeOS image found in ${IMAGE_DIR}.
+This installer is meant to run from the HomeOS ISO."
+
+IMAGE_SIZE="$(stat -c %s "$IMAGE")"
+
+# --------------------------------------------------------------------------
+# Which disks can we write to?
+# --------------------------------------------------------------------------
+# The live medium itself is excluded: offering to overwrite the USB stick you
+# booted from is a mistake nobody recovers from mid-install.
+LIVE_DISK=""
+if live_src="$(findmnt -no SOURCE /run/live/medium 2>/dev/null)"; then
+    LIVE_DISK="$(lsblk -no PKNAME "$live_src" 2>/dev/null || true)"
+fi
+
+mapfile -t DISKS < <(
+    lsblk -dnpo NAME,SIZE,MODEL,TYPE,RM 2>/dev/null \
+    | awk '$4 == "disk" { print }' \
+    | while read -r name size model type rm; do
+        base="${name#/dev/}"
+        [[ -n "$LIVE_DISK" && "$base" == "$LIVE_DISK" ]] && continue
+        printf '%s|%s|%s|%s\n' "$name" "$size" "${model:-unknown}" "$rm"
+      done
+)
+
+(( ${#DISKS[@]} > 0 )) || die "No disk available to install to.
+The only disk found is the one you booted from."
+
+clear
+cat <<BANNER
+${BOLD}HomeOS installer${OFF}
+
+  Image:  $(basename "$IMAGE")  ${DIM}($(numfmt --to=iec "$IMAGE_SIZE"))${OFF}
+
+${BOLD}Choose a disk.${OFF} Everything on it will be erased.
+
+BANNER
+
+i=0
+for entry in "${DISKS[@]}"; do
+    IFS='|' read -r name size model rm <<<"$entry"
+    i=$((i + 1))
+    flag=""
+    [[ "$rm" == "1" ]] && flag="  ${YLW}removable${OFF}"
+    printf '  %s%d)%s  %-12s %-9s %s%s\n' "$BOLD" "$i" "$OFF" "$name" "$size" "$model" "$flag"
+done
+printf '\n  %sq)%s  cancel and drop to a shell\n\n' "$BOLD" "$OFF"
+
+while true; do
+    read -rp "  Disk [1-${#DISKS[@]}, q]: " choice
+    [[ "$choice" == "q" ]] && { printf '\n  Cancelled.\n\n'; exit 0; }
+    [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#DISKS[@]} )) && break
+    printf '  %sNot a listed option.%s\n' "$RED" "$OFF"
+done
+
+IFS='|' read -r TARGET SIZE MODEL _ <<<"${DISKS[$((choice - 1))]}"
+
+# --------------------------------------------------------------------------
+# Confirm, in the way that makes an accident hard
+# --------------------------------------------------------------------------
+printf '\n%s' "$RED"
+cat <<WARN
+  This erases every byte on ${TARGET} (${SIZE}, ${MODEL}).
+  There is no undo, and nothing on it can be recovered afterwards.
+WARN
+printf '%s\n' "$OFF"
+
+# Typing the device path, not "yes": a reflex "y" is exactly what this needs to
+# not be enough.
+read -rp "  Type ${TARGET} to confirm: " confirm
+[[ "$confirm" == "$TARGET" ]] || { printf '\n  Cancelled.\n\n'; exit 0; }
+
+# Anything mounted from the target would give a torn write.
+while read -r part; do
+    [[ -n "$part" ]] || continue
+    umount -f "$part" 2>/dev/null || true
+done < <(lsblk -nlpo NAME "$TARGET" | tail -n +2)
+swapoff -a 2>/dev/null || true
+
+# --------------------------------------------------------------------------
+# Write
+# --------------------------------------------------------------------------
+printf '\n  Writing. This takes a few minutes and must not be interrupted.\n\n'
+
+if command -v pv >/dev/null 2>&1; then
+    xzcat "$IMAGE" | pv -s "$(xz --robot --list "$IMAGE" | awk '/^totals/ {print $5}')" \
+        | dd of="$TARGET" bs=4M conv=fsync status=none
+else
+    xzcat "$IMAGE" | dd of="$TARGET" bs=4M conv=fsync status=progress
+fi
+
+sync
+# Without this the kernel keeps the old table and the verification below reads
+# stale partition nodes.
+partprobe "$TARGET" 2>/dev/null || blockdev --rereadpt "$TARGET" 2>/dev/null || true
+sleep 2
+
+# --------------------------------------------------------------------------
+# Verify enough to be worth saying "done"
+# --------------------------------------------------------------------------
+if ! lsblk -nlo LABEL "$TARGET" 2>/dev/null | grep -q homeos-root; then
+    die "The image was written but ${TARGET} has no homeos-root partition.
+Something went wrong; do not reboot into it."
+fi
+
+printf '\n%s' "$GRN"
+cat <<DONE
+  HomeOS is installed on ${TARGET}.
+DONE
+printf '%s' "$OFF"
+cat <<NEXT
+
+  Remove the USB stick and reboot.
+
+  On first boot the appliance grows the filesystem to fill the disk,
+  generates its own SSH host keys, and starts up. Give it a minute,
+  then open:
+
+      http://homenas.local
+
+  If that name does not resolve, your router or Wi-Fi is blocking mDNS —
+  find the address on the router and use it directly.
+
+NEXT
+
+read -rp "  Reboot now? [y/N] " r
+[[ "$r" =~ ^[Yy]$ ]] && { printf '\n  Rebooting.\n\n'; sleep 1; systemctl reboot; }
+exit 0

@@ -53,6 +53,8 @@ Usage: sudo ./install.sh [options]
   --hostname NAME     appliance hostname, reachable as NAME.local (default: homenas)
   --timezone TZ       IANA timezone, e.g. Europe/Rome (default: keep current)
   --route-mode MODE   default app routing: host | path | port (default: host)
+  --image-build       building a disk image in a chroot: configure everything
+                      but start nothing, and defer runtime setup to first boot
   --skip-docker       assume a working Docker Engine is already installed
   --skip-samba        do not install or configure SMB file sharing
   -y, --yes           never prompt
@@ -74,6 +76,7 @@ parse_args() {
             --timezone=*)  HOMEOS_TZ="${1#*=}"; shift ;;
             --route-mode)  HOMEOS_ROUTE_MODE="${2:?--route-mode needs a value}"; shift 2 ;;
             --route-mode=*) HOMEOS_ROUTE_MODE="${1#*=}"; shift ;;
+            --image-build) HOMEOS_IMAGE_BUILD=1; HOMEOS_ASSUME_YES=1; shift ;;
             --skip-docker) HOMEOS_SKIP_DOCKER=1; shift ;;
             --skip-samba)  HOMEOS_SKIP_SAMBA=1; shift ;;
             --uninstall)   HOMEOS_UNINSTALL=1; shift ;;
@@ -96,6 +99,7 @@ parse_args() {
         *) die "--route-mode must be one of: host, path, port" ;;
     esac
 
+    export HOMEOS_IMAGE_BUILD="${HOMEOS_IMAGE_BUILD:-}"
     export HOMEOS_ASSUME_YES="${HOMEOS_ASSUME_YES:-}"
     export HOMEOS_FORCE="${HOMEOS_FORCE:-}"
     export HOMEOS_DRY_RUN="${HOMEOS_DRY_RUN:-}"
@@ -284,6 +288,33 @@ stage::timezone() {
     fi
 }
 
+# A chroot has no address to advertise and nothing running to report on.
+stage::image_summary() {
+    cat >&2 <<BANNER
+
+${C_GRN}${C_BOLD}HomeOS ${HOMEOS_VERSION} baked into the image.${C_RESET}
+
+  Configured, enabled, and deliberately not started. On first boot the
+  appliance generates its own host identity, grows the root filesystem to
+  the disk it was written to, and creates the container network.
+
+BANNER
+}
+
+# A chroot has no address to advertise and nothing running to report on, so the
+# normal closing banner would be a page of lies.
+stage::image_summary() {
+    cat >&2 <<BANNER
+
+${C_GRN}${C_BOLD}HomeOS ${HOMEOS_VERSION} baked into the image.${C_RESET}
+
+  Configured and enabled, deliberately not started. On first boot the
+  appliance generates its own host identity, grows the root filesystem to
+  fill the disk it was written to, and creates the container network.
+
+BANNER
+}
+
 stage::summary() {
     local ip; ip="$(primary_ip)"
     cat >&2 <<BANNER
@@ -433,9 +464,19 @@ main() {
     fi
 
     packages::verify
-    /usr/lib/homeos/bin/homeos-proxy-sync sync >/dev/null 2>&1 || true
 
-    # install.sh already did the first-boot work.
+    if [[ -n "$HOMEOS_IMAGE_BUILD" ]]; then
+        # The stamp is deliberately NOT written. An image is cloned to many
+        # machines and every one of them needs first boot to run: unique SSH
+        # host keys, a unique machine-id, the root filesystem grown to whatever
+        # disk it was written to, and the container network created against a
+        # daemon that is finally running.
+        log::info "image build: first boot finishes the setup on the target"
+        stage::image_summary
+        return 0
+    fi
+
+    /usr/lib/homeos/bin/homeos-proxy-sync sync >/dev/null 2>&1 || true
     [[ -n "${HOMEOS_DRY_RUN:-}" ]] || \
         date -u '+%Y-%m-%dT%H:%M:%SZ' > /var/lib/homeos/.firstboot-done
 

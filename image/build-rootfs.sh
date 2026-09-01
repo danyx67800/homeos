@@ -1,0 +1,219 @@
+#!/usr/bin/env bash
+#
+# build-rootfs.sh — bootstrap a Debian root filesystem with HomeOS installed.
+#
+#   sudo image/build-rootfs.sh <arch> <output-dir>
+#
+# This is the shared base: both the flashable disk image and the installer ISO
+# are made from the tree this produces. It runs install.sh --image-build inside
+# a chroot, so the image is configured by exactly the same code that configures
+# a machine somebody installs by hand — there is no second implementation to
+# drift out of step.
+#
+set -euo pipefail
+
+ARCH="${1:-amd64}"
+ROOTFS="${2:-}"
+SUITE="${HOMEOS_SUITE:-bookworm}"
+MIRROR="${HOMEOS_MIRROR:-http://deb.debian.org/debian}"
+REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+
+step() { printf '\n\033[34m==>\033[0m %s\n' "$*"; }
+die()  { printf '\033[31m[XX]\033[0m %s\n' "$*" >&2; exit 1; }
+
+[[ "${EUID:-$(id -u)}" -eq 0 ]] || die "run with sudo: debootstrap and chroot need root"
+[[ -n "$ROOTFS" ]] || die "usage: build-rootfs.sh <arch> <output-dir>"
+case "$ARCH" in amd64|arm64) ;; *) die "arch must be amd64 or arm64" ;; esac
+
+for t in debootstrap chroot; do
+    command -v "$t" >/dev/null || die "$t is required (apt install debootstrap)"
+done
+
+# --------------------------------------------------------------------------
+# Bootstrap
+# --------------------------------------------------------------------------
+step "debootstrap ${SUITE}/${ARCH}"
+rm -rf "$ROOTFS"
+mkdir -p "$ROOTFS"
+
+DEBOOTSTRAP_ARGS=(
+    --arch="$ARCH"
+    --variant=minbase
+    # ca-certificates and the apt plumbing have to exist before install.sh can
+    # add the Docker and Caddy repositories.
+    --include=systemd,systemd-sysv,dbus,ca-certificates,apt-transport-https,gnupg,curl,sudo,locales,less,nano,openssh-server
+)
+
+if [[ "$ARCH" != "$(dpkg --print-architecture)" ]]; then
+    command -v qemu-"${ARCH/arm64/aarch64}"-static >/dev/null \
+        || die "cross-building ${ARCH} needs qemu-user-static and binfmt registered"
+    DEBOOTSTRAP_ARGS+=(--foreign)
+fi
+
+debootstrap "${DEBOOTSTRAP_ARGS[@]}" "$SUITE" "$ROOTFS" "$MIRROR" \
+    || die "debootstrap failed"
+
+if [[ "$ARCH" != "$(dpkg --print-architecture)" ]]; then
+    QEMU="/usr/bin/qemu-${ARCH/arm64/aarch64}-static"
+    cp "$QEMU" "${ROOTFS}${QEMU}"
+    chroot "$ROOTFS" /debootstrap/debootstrap --second-stage \
+        || die "debootstrap second stage failed"
+fi
+
+# --------------------------------------------------------------------------
+# chroot plumbing
+# --------------------------------------------------------------------------
+CLEANED=0
+cleanup() {
+    (( CLEANED )) && return 0
+    CLEANED=1
+    # Reverse order, and lazily: a leftover bind mount inside a rootfs that
+    # then gets tarred or deleted is how build hosts lose their /dev.
+    for m in dev/pts dev proc sys run; do
+        mountpoint -q "${ROOTFS}/${m}" && umount -lf "${ROOTFS}/${m}" || true
+    done
+    rm -f "${ROOTFS}/usr/sbin/policy-rc.d" "${ROOTFS}/etc/resolv.conf.bak"
+}
+trap cleanup EXIT INT TERM
+
+mount -t proc  proc   "${ROOTFS}/proc"
+mount -t sysfs sysfs  "${ROOTFS}/sys"
+mount --bind /dev     "${ROOTFS}/dev"
+mount -t devpts devpts "${ROOTFS}/dev/pts"
+mount -t tmpfs tmpfs  "${ROOTFS}/run"
+
+cp /etc/resolv.conf "${ROOTFS}/etc/resolv.conf"
+
+# apt starts daemons the moment it installs them. In a chroot that is at best
+# useless and at worst wedges the build; policy-rc.d is the supported way to
+# say no.
+cat > "${ROOTFS}/usr/sbin/policy-rc.d" <<'POLICY'
+#!/bin/sh
+exit 101
+POLICY
+chmod 0755 "${ROOTFS}/usr/sbin/policy-rc.d"
+
+in_chroot() { chroot "$ROOTFS" /usr/bin/env -i \
+    PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    HOME=/root TERM=dumb DEBIAN_FRONTEND=noninteractive \
+    HOMEOS_IMAGE_BUILD=1 \
+    /bin/bash -c "$*"; }
+
+# --------------------------------------------------------------------------
+# Base system
+# --------------------------------------------------------------------------
+step "Base configuration"
+cat > "${ROOTFS}/etc/apt/sources.list" <<APT
+deb ${MIRROR} ${SUITE} main contrib non-free-firmware
+deb ${MIRROR} ${SUITE}-updates main contrib non-free-firmware
+deb http://security.debian.org/debian-security ${SUITE}-security main contrib non-free-firmware
+APT
+
+in_chroot "apt-get update -qq" || die "apt-get update failed in the chroot"
+
+# A kernel, firmware and the tools first boot needs to grow the root
+# filesystem. cloud-guest-utils carries growpart, which homeos-firstboot uses.
+KERNEL_PKGS="linux-image-${ARCH} firmware-linux-free"
+[[ "$ARCH" == "amd64" ]] && KERNEL_PKGS="linux-image-amd64 firmware-linux-free"
+[[ "$ARCH" == "arm64" ]] && KERNEL_PKGS="linux-image-arm64 firmware-linux-free"
+
+in_chroot "apt-get install -y -qq --no-install-recommends \
+    ${KERNEL_PKGS} \
+    initramfs-tools \
+    cloud-guest-utils \
+    ifupdown isc-dhcp-client \
+    systemd-timesyncd \
+    haveged" || die "installing the base system failed"
+
+step "Locale, hostname and console"
+in_chroot "sed -i 's/^# *en_US.UTF-8/en_US.UTF-8/' /etc/locale.gen && locale-gen >/dev/null"
+echo "LANG=en_US.UTF-8" > "${ROOTFS}/etc/default/locale"
+echo "homenas" > "${ROOTFS}/etc/hostname"
+cat > "${ROOTFS}/etc/hosts" <<HOSTS
+127.0.0.1	localhost
+127.0.1.1	homenas homenas.local
+::1		localhost ip6-localhost ip6-loopback
+HOSTS
+
+# DHCP on whatever the first wired interface turns out to be. An appliance is
+# plugged into a home router; asking the user to configure networking before
+# they can reach the dashboard defeats the point.
+cat > "${ROOTFS}/etc/systemd/network/10-wired.network" <<NET
+[Match]
+Name=en* eth*
+
+[Network]
+DHCP=yes
+NET
+in_chroot "systemctl enable systemd-networkd systemd-resolved ssh >/dev/null 2>&1" || true
+
+# --------------------------------------------------------------------------
+# HomeOS
+# --------------------------------------------------------------------------
+step "Installing HomeOS"
+
+# The prebuilt binary and dashboard are expected beside this script. Building
+# them inside the chroot would mean carrying a Go toolchain into the image, and
+# cross-building a Go binary on the host is both faster and reproducible.
+BIN="${REPO_ROOT}/dist/homeos-core-linux-${ARCH}"
+WEB="${REPO_ROOT}/web/dist"
+[[ -x "$BIN" ]] || die "missing ${BIN}
+     Build it first:  make -C backend build-all"
+[[ -f "${WEB}/index.html" ]] || die "missing ${WEB}/index.html
+     Build it first:  make -C web build"
+
+mkdir -p "${ROOTFS}/opt/homeos-src"
+# --exclude keeps the build host's own artefacts out of the image.
+tar -C "$REPO_ROOT" \
+    --exclude=.git --exclude=node_modules --exclude=dist --exclude=.testbin \
+    -cf - install.sh scripts config \
+    | tar -C "${ROOTFS}/opt/homeos-src" -xf -
+
+in_chroot "cd /opt/homeos-src && ./install.sh --image-build --hostname homenas" \
+    || die "install.sh failed inside the chroot"
+
+step "Baking in the backend and the dashboard"
+install -D -m 0755 "$BIN" "${ROOTFS}/usr/lib/homeos/bin/homeos-core"
+mkdir -p "${ROOTFS}/usr/lib/homeos/current/web"
+cp -a "${WEB}/." "${ROOTFS}/usr/lib/homeos/current/web/"
+
+# install.sh laid out releases/<version>/ and pointed current at it; the binary
+# has to land inside that release, not beside it, or an update would replace a
+# tree the running binary is not part of.
+RELEASE_DIR="$(chroot "$ROOTFS" readlink -f /usr/lib/homeos/current 2>/dev/null || true)"
+[[ -n "$RELEASE_DIR" ]] || die "install.sh did not create /usr/lib/homeos/current"
+in_chroot "test -x /usr/lib/homeos/bin/homeos-core" \
+    || die "the binary did not land where /usr/lib/homeos/bin points"
+in_chroot "/usr/lib/homeos/bin/homeos-core -version" \
+    || die "the baked-in binary does not run on ${ARCH}"
+
+# --------------------------------------------------------------------------
+# First boot
+# --------------------------------------------------------------------------
+step "First-boot wiring"
+in_chroot "systemctl enable homeos-firstboot homeos-core homeos-proxy-sync >/dev/null 2>&1" || true
+# Belt and braces: install.sh already refuses to write this in image mode, but
+# an image that skips first boot ships with cloned SSH host keys.
+rm -f "${ROOTFS}/var/lib/homeos/.firstboot-done"
+
+# A fresh appliance has no root password and no user. Access is the dashboard
+# and, for anyone who needs it, SSH with a key they add themselves.
+in_chroot "passwd -l root >/dev/null 2>&1" || true
+
+# --------------------------------------------------------------------------
+# Slim down
+# --------------------------------------------------------------------------
+step "Cleaning up"
+in_chroot "apt-get autoremove -y -qq && apt-get clean"
+rm -rf "${ROOTFS}/opt/homeos-src" \
+       "${ROOTFS}/var/lib/apt/lists"/* \
+       "${ROOTFS}/var/cache/apt"/*.bin \
+       "${ROOTFS}/tmp"/* \
+       "${ROOTFS}/var/tmp"/*
+: > "${ROOTFS}/etc/machine-id"          # regenerated per machine on first boot
+rm -f "${ROOTFS}"/etc/ssh/ssh_host_*    # regenerated per machine on first boot
+find "${ROOTFS}/var/log" -type f -delete 2>/dev/null || true
+
+cleanup
+printf '\n\033[32m[ok]\033[0m rootfs ready: %s (%s)\n' \
+    "$ROOTFS" "$(du -sh "$ROOTFS" | cut -f1)"

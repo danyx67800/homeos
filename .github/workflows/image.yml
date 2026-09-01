@@ -1,0 +1,170 @@
+name: Build appliance images
+
+# Images are big and slow to build, so this does not run on every push.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to stamp into the image'
+        required: false
+        default: 'dev'
+      publish:
+        description: 'Attach the results to a GitHub release'
+        type: boolean
+        default: false
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write   # needed to create the release these artefacts attach to
+
+jobs:
+  build:
+    name: ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          # Free arm64 hosted runners are available to public repositories.
+          # If this label is ever unavailable, the job fails loudly rather than
+          # silently producing an amd64 binary with an arm64 name.
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Work out the version
+        id: v
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            V="${GITHUB_REF_NAME#v}"
+          else
+            V="${{ inputs.version || 'dev' }}"
+          fi
+          echo "version=${V}" >> "$GITHUB_OUTPUT"
+          echo "Building HomeOS ${V} for ${{ matrix.arch }}"
+
+      - name: Confirm the runner is the architecture it claims
+        run: |
+          # A silent fallback to an amd64 runner would produce an image named
+          # arm64 that boots on nothing.
+          want='${{ matrix.arch }}'
+          got="$(dpkg --print-architecture)"
+          echo "runner architecture: ${got}, wanted: ${want}"
+          [ "$got" = "$want" ] || {
+            echo "::error::runner is ${got} but this job builds ${want}"
+            exit 1
+          }
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install image build tooling
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends \
+            debootstrap squashfs-tools xorriso grub-common \
+            mtools dosfstools gdisk parted rsync xz-utils file
+          # grub-mkrescue needs the GRUB modules for the target it produces, and
+          # those ship as per-architecture packages: installing the arm64 set on
+          # an amd64 runner fails. The chroot installs its own GRUB separately,
+          # so this is only for the ISO.
+          if [ "${{ matrix.arch }}" = "amd64" ]; then
+            sudo apt-get install -y -qq --no-install-recommends \
+              grub-pc-bin grub-efi-amd64-bin
+          else
+            sudo apt-get install -y -qq --no-install-recommends \
+              grub-efi-arm64-bin
+          fi
+
+      - name: Build the backend and the dashboard
+        env:
+          VERSION: ${{ steps.v.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          # Built on the runner, not in the chroot: cross-compiling a static Go
+          # binary is faster and keeps a compiler out of the image.
+          ( cd backend && CGO_ENABLED=0 GOOS=linux GOARCH=${{ matrix.arch }} \
+              go build -trimpath -ldflags "-s -w -X main.Version=${VERSION}" \
+              -o "../dist/homeos-core-linux-${{ matrix.arch }}" ./cmd/homeos-core )
+          ( cd web && npm ci --omit=optional && npm run build )
+          ls -la dist/ web/dist/index.html
+
+      - name: Build the root filesystem
+        run: sudo image/build-rootfs.sh "${{ matrix.arch }}" "${{ runner.temp }}/rootfs"
+
+      - name: Build the disk image
+        env:
+          VERSION: ${{ steps.v.outputs.version }}
+        run: |
+          set -euo pipefail
+          NAME="homeos-${VERSION}-${{ matrix.arch }}"
+          sudo image/build-disk.sh "${{ matrix.arch }}" "${{ runner.temp }}/rootfs" "dist/${NAME}.img"
+          echo "IMG_NAME=${NAME}" >> "$GITHUB_ENV"
+
+      - name: Compress and checksum the image
+        run: |
+          set -euo pipefail
+          # -T0 uses every core the runner has; the image is the slowest step
+          # in this workflow and it compresses well.
+          sudo chown "$(id -u):$(id -g)" "dist/${IMG_NAME}.img"
+          xz -T0 -6 "dist/${IMG_NAME}.img"
+          ( cd dist && sha256sum "${IMG_NAME}.img.xz" > "${IMG_NAME}.img.xz.sha256" )
+          ls -lh dist/
+
+      - name: Build the installer ISO
+        env:
+          HOMEOS_VERSION: ${{ steps.v.outputs.version }}
+        run: |
+          set -euo pipefail
+          sudo -E image/build-iso.sh "${{ matrix.arch }}" \
+              "dist/${IMG_NAME}.img.xz" "dist/${IMG_NAME}.iso"
+          sudo chown "$(id -u):$(id -g)" "dist/${IMG_NAME}.iso"
+          ( cd dist && sha256sum "${IMG_NAME}.iso" > "${IMG_NAME}.iso.sha256" )
+          ls -lh dist/
+
+      - name: Check the artefacts are what they claim to be
+        run: |
+          set -euo pipefail
+          # A file(1) check catches the failure mode that matters: an image that
+          # built without error but has no partition table or no boot sector.
+          file "dist/${IMG_NAME}.iso"
+          xz -t "dist/${IMG_NAME}.img.xz" && echo "  xz stream intact"
+          file "dist/${IMG_NAME}.iso" | grep -qi 'ISO 9660' \
+            || { echo "::error::the ISO is not an ISO 9660 image"; exit 1; }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: homeos-${{ matrix.arch }}
+          # The image and ISO together are well over the comfortable artifact
+          # size; only the checksums are kept for inspection, and the real
+          # delivery is the release below.
+          path: |
+            dist/*.sha256
+          retention-days: 7
+
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.publish
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || format('v{0}', steps.v.outputs.version) }}
+          draft: true
+          files: |
+            dist/*.img.xz
+            dist/*.img.xz.sha256
+            dist/*.iso
+            dist/*.iso.sha256

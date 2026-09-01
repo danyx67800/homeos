@@ -172,6 +172,13 @@ preflight::conflicts() {
      Remove it first, or re-run with --force if the ports really do not collide."
     fi
 
+    # In a chroot the listening sockets belong to the build host, not to the
+    # image being built, so checking them says nothing useful.
+    if [[ -n "${HOMEOS_IMAGE_BUILD:-}" ]]; then
+        log::skip "port conflict check (building an image)"
+        return 0
+    fi
+
     local p owner
     for p in 80 443; do
         port_in_use "$p" || continue

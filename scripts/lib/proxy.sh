@@ -32,11 +32,16 @@ proxy::install() {
     proxy::write_unit_override
     proxy::grant_access
 
-    if proxy::validate; then
-        svc_enable_now caddy.service || die "Caddy failed to start"
-    else
-        die "the generated Caddyfile is invalid - Caddy was not started"
+    # Validation is a pure parse and works fine in a chroot, so a broken
+    # Caddyfile still fails the image build rather than the first boot.
+    proxy::validate || die "the generated Caddyfile is invalid"
+
+    if [[ -n "${HOMEOS_IMAGE_BUILD:-}" ]]; then
+        run systemctl enable caddy.service >/dev/null 2>&1 || true
+        log::skip "not starting Caddy (building an image)"
+        return 0
     fi
+    svc_enable_now caddy.service || die "Caddy failed to start"
 }
 
 # Caddy's own packaged user needs to read our config tree.

@@ -103,7 +103,12 @@ samba::apply() {
         fi
     fi
 
-    svc_enable_now smbd.service || log::warn "smbd did not start"
+    if [[ -n "${HOMEOS_IMAGE_BUILD:-}" ]]; then
+        run systemctl enable smbd.service >/dev/null 2>&1 || true
+        log::skip "not starting Samba (building an image)"
+    else
+        svc_enable_now smbd.service || log::warn "smbd did not start"
+    fi
 
     # nmbd serves NetBIOS browsing, which we deliberately disabled above.
     if systemctl list-unit-files nmbd.service >/dev/null 2>&1; then
