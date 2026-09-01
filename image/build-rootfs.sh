@@ -129,6 +129,15 @@ in_chroot "apt-get install -y -qq --no-install-recommends \
     systemd-timesyncd \
     haveged" || die "installing the base system failed"
 
+# Installing systemd-resolved points /etc/resolv.conf at its stub, and the stub
+# only exists once resolved is running — which it is not, in a chroot. Put a
+# real resolver back for the rest of the build; the symlink is restored at the
+# end, so the appliance still ships with resolved owning it.
+rm -f "${ROOTFS}/etc/resolv.conf"
+cp -L /etc/resolv.conf "${ROOTFS}/etc/resolv.conf"
+in_chroot "getent hosts deb.debian.org >/dev/null" \
+    || die "DNS stopped working inside the chroot after installing the base system"
+
 step "Locale, hostname and console"
 in_chroot "sed -i 's/^# *en_US.UTF-8/en_US.UTF-8/' /etc/locale.gen && locale-gen >/dev/null"
 echo "LANG=en_US.UTF-8" > "${ROOTFS}/etc/default/locale"
