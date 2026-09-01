@@ -253,8 +253,11 @@ stage::systemd() {
     if [[ -x /usr/lib/homeos/bin/homeos-core ]]; then
         svc_enable_now homeos-core.service || log::warn "homeos-core did not start"
     else
-        log::info "homeos-core.service enabled; build and install the backend with:"
-        log::info "  cd backend && sudo make install"
+        log::info "homeos-core.service is enabled but has no binary yet."
+        log::info "Building from source needs Go and Node, which are not installed"
+        log::info "here on purpose — an appliance should not carry a compiler:"
+        log::info "  sudo scripts/install-build-deps.sh"
+        log::info "  make build && sudo make install"
     fi
 
     svc_enable_now homeos-proxy-sync.service || log::warn "proxy sync did not start"
@@ -306,8 +309,9 @@ ${C_GRN}${C_BOLD}HomeOS ${HOMEOS_VERSION} installed.${C_RESET}
       homeos.port=8096
   ...then: homeos-proxy-sync sync   (or let the watcher pick it up)
 
-${C_YLW}The web dashboard and REST API arrive in phases 2-3; the appliance
-substrate they run on is in place now.${C_RESET}
+${C_YLW}The backend and dashboard are not installed yet. Build them with:
+  sudo scripts/install-build-deps.sh   (Go and Node, one time)
+  make build && sudo make install${C_RESET}
 
 BANNER
 }

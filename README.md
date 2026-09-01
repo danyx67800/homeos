@@ -109,11 +109,17 @@ Full label reference and the three routing modes:
 dormant until the binary exists. Build and drop it in:
 
 ```bash
+sudo scripts/install-build-deps.sh   # Go 1.25+ and Node 18+, one time
 cd backend
-make            # vet, test, build
+make                                 # vet, test, build
 sudo make install
 sudo systemctl restart homeos-core
 ```
+
+Go comes from go.dev rather than apt: HomeOS needs 1.25 and the newest any
+supported distribution packages is 1.24. `install.sh` does not install it on
+purpose — an appliance should not be carrying a compiler, and the normal way to
+get HomeOS onto a box is a prebuilt release.
 
 Cross-compiling for the appliance from any machine:
 
@@ -124,8 +130,7 @@ make build-all   # dist/homeos-core-linux-{amd64,arm64}
 The output is a single static binary (`CGO_ENABLED=0`), which is what makes the
 phase-4 OTA update a file replacement rather than a package transaction.
 
-Requires Go 1.25+ to build; nothing on the target beyond what `install.sh`
-already installed.
+Nothing else is needed on the target beyond what `install.sh` already put there.
 
 ### Driving the API
 

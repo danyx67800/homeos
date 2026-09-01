@@ -29,12 +29,23 @@ cd homeos
 sudo ./install.sh --hostname mynas --timezone Europe/Rome
 ```
 
-Then build and install the software:
+That sets up Docker, the proxy, file sharing and the system services — but not
+the HomeOS software itself, which has to be built.
+
+Building needs Go 1.25+ and Node 18+. **No distribution packages a Go that
+new**, so `install.sh` does not install one: an appliance has no business
+carrying a compiler. Install the toolchain once, then build:
 
 ```bash
+sudo scripts/install-build-deps.sh
 make build
 sudo make install
 ```
+
+> Prefer not to put a compiler on the appliance? Build on any other machine
+> with `make -C backend build-all` and `make -C web build`, then copy
+> `backend/dist/homeos-core-linux-<arch>` to
+> `/usr/lib/homeos/bin/homeos-core` and `web/dist/` to `/opt/homeos/web/`.
 
 Open **`http://mynas.local`** and create your admin account.
 

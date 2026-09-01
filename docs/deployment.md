@@ -22,6 +22,7 @@ Three ways to run HomeOS, in the order most people will want them:
 | OS | Debian 12+ or Ubuntu 22.04+, minimal install, SSH reachable |
 | Network | wired is strongly preferred; mDNS over Wi-Fi is unreliable on many routers |
 | Ports | 80, 443 and 445 free |
+| To build from source | Go 1.25+ and Node 18+ — see below; not installed by `install.sh` |
 
 A second disk for data is not required to install, but it is the point of the
 exercise. HomeOS never formats your system disk.
@@ -38,12 +39,31 @@ The installer is idempotent and reports what it skipped, so re-running it after
 a change is safe. `--dry-run` prints every action without making any.
 
 It does not build the backend or the dashboard. On a released appliance those
-arrive as a signed release; from a source checkout, build them:
+arrive as a signed release; from a source checkout you build them yourself —
+which needs a toolchain `install.sh` deliberately does not install:
 
 ```bash
+sudo scripts/install-build-deps.sh   # Go from go.dev, Node from apt
 make build
 sudo make install
 ```
+
+Go has to come from go.dev rather than apt: HomeOS needs 1.25, and the newest
+any supported release packages is 1.24 (Debian 13). The script reads the
+required version out of `backend/go.mod`, fetches the matching tarball, and
+verifies it against the checksum go.dev publishes before unpacking anything.
+
+If you would rather keep the compiler off the appliance, build elsewhere and
+copy two things across:
+
+```bash
+make -C backend build-all          # dist/homeos-core-linux-{amd64,arm64}
+make -C web build                  # web/dist/
+```
+
+`homeos-core` goes to `/usr/lib/homeos/bin/`, the dashboard to
+`/opt/homeos/web/`. Both are symlinks into the current release, so a later
+over-the-air update replaces them cleanly.
 
 Then open `http://mynas.local` and complete the first-run wizard. There is one
 administrator account and no password recovery, so put the password somewhere
@@ -109,7 +129,7 @@ the containers say so rather than pretending:
 ## Building from source
 
 ```bash
-make build     # backend (Go 1.25+) and dashboard (Node 22+)
+make build     # backend (Go 1.25+) and dashboard (Node 18+)
 make test      # go test -race ./...
 make -C web e2e   # 21 browser checks against a running daemon
 ```
