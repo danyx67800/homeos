@@ -11,9 +11,14 @@ air with automatic rollback. Everything below has been built and tested.
 
 ## Install
 
-**The easy way** — flash a prebuilt image, no Linux setup at all:
+**The easy way** — flash a prebuilt image, no Linux setup at all. Download from
+[the latest release](https://github.com/danyx67800/homeos/releases/latest):
+`amd64` for a PC or mini PC, `arm64` for a Raspberry Pi 4/5.
 
 ```bash
+# Check what you downloaded before writing it to a disk
+sha256sum -c homeos-<version>-amd64.img.xz.sha256
+
 # On another machine: write the image to the appliance's disk
 xzcat homeos-<version>-amd64.img.xz | sudo dd of=/dev/sdX bs=4M conv=fsync status=progress
 ```
